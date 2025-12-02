@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getCustomers, updateCustomer, createCustomer, deleteCustomer } from '../services/customerService';
-import { getCustomerTax, saveCustomerTax } from '../services/customerTaxService';
+import { saveCustomerTax } from '../services/customerTaxService';
 import { getCustomerCardValues, saveCustomerCardValues, deleteCustomerCardValues } from '../services/customerCardValuesService';
 import { Customer, CieloTerminal } from '../types';
 import { Plus, Edit, Trash2, Shield, Search, Building2, CreditCard, X, ExternalLink, DollarSign, FileSpreadsheet, Percent, Settings } from 'lucide-react';
@@ -18,15 +18,19 @@ const Customers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [sortBy, setSortBy] = useState<'name'>('name');
-  const [formData, setFormData] = useState({
+
+  const initialFormData = {
     name: '',
     email: '',
     phone: '',
     status: 'active' as 'active' | 'inactive',
+    region: '',
     username: '',
     password: '',
     cieloTerminals: [] as Array<{ terminalId: string; name: string }>,
-  });
+  };
+
+  const [formData, setFormData] = useState(initialFormData);
   
   const [newTerminal, setNewTerminal] = useState({ terminalId: '', name: '' });
   const [selectedCustomerForSpreadsheet, setSelectedCustomerForSpreadsheet] = useState<{ id: string; name: string } | null>(null);
@@ -144,6 +148,7 @@ const Customers = () => {
       
       const customerDataWithTerminals = {
         ...customerData,
+        region: customerData.region || 'Sudeste',
         cieloTerminals: terminals.length > 0 ? terminals : undefined,
       };
       
@@ -187,15 +192,7 @@ const Customers = () => {
       // Se foi edição ou não encontrou o cliente, fechar o modal normalmente
       setShowModal(false);
       setEditingCustomer(null);
-      setFormData({
-        name: '',
-        email: '',
-        phone: '',
-        status: 'active',
-        username: '',
-        password: '',
-        cieloTerminals: [],
-      });
+      setFormData(initialFormData);
       setNewTerminal({ terminalId: '', name: '' });
       setSelectedTerminalForSpreadsheet(null);
     } catch (error) {
@@ -227,6 +224,7 @@ const Customers = () => {
       email: customer.email,
       phone: customer.phone,
       status: customer.status,
+      region: customer.region || '',
       username: customer.username || '',
       password: '', // Não preencher senha ao editar por segurança
       cieloTerminals: terminals,
@@ -249,15 +247,7 @@ const Customers = () => {
 
   const openNewCustomerModal = () => {
     setEditingCustomer(null);
-    setFormData({
-      name: '',
-      email: '',
-      phone: '',
-      status: 'active',
-      username: '',
-      password: '',
-      cieloTerminals: [],
-    });
+    setFormData(initialFormData);
     setNewTerminal({ terminalId: '', name: '' });
     setShowModal(true);
   };
@@ -510,7 +500,7 @@ const Customers = () => {
               {editingCustomer ? 'Editar Cliente' : 'Novo Cliente'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-black mb-2">Nome</label>
                   <input
@@ -540,6 +530,21 @@ const Customers = () => {
                     required
                     className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-2">Região</label>
+                  <select
+                    value={formData.region}
+                    onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                  >
+                    <option value="">Selecione</option>
+                    <option value="Sudeste">Sudeste</option>
+                    <option value="Sul">Sul</option>
+                    <option value="Nordeste">Nordeste</option>
+                    <option value="Norte">Norte</option>
+                    <option value="Centro-Oeste">Centro-Oeste</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-black mb-2">Status</label>

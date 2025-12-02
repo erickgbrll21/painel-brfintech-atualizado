@@ -6,11 +6,6 @@ import {
   CreditCard,
   ArrowLeft,
   FileSpreadsheet,
-  Building2,
-  Wallet,
-  CheckCircle,
-  Clock,
-  XCircle,
   Percent
 } from 'lucide-react';
 import KPICard from '../components/KPICard';

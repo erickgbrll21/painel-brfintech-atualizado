@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, UserRole } from '../types';
+import { User } from '../types';
 import { getUsers, getUserPasswordByEmail } from '../services/userService';
 import { getCustomers, getCustomerPassword } from '../services/customerService';
 

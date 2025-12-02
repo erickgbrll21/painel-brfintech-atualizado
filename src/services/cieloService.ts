@@ -49,6 +49,8 @@ export const getCieloTransactions = async (
         merchantOrderId: '',
         pageSize: 100,
         page: 1,
+        startDate,
+        endDate,
       },
     });
     

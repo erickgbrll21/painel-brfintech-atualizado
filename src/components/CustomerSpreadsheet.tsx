@@ -20,13 +20,6 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
   const [previewData, setPreviewData] = useState<SpreadsheetData | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
-  const loadSpreadsheet = () => {
-    const data = terminalId 
-      ? getSpreadsheetByTerminalId(terminalId, customerId)
-      : getSpreadsheetByCustomerId(customerId);
-    setSpreadsheetData(data);
-  };
-
   useEffect(() => {
     let lastHash = '';
     
@@ -94,19 +87,6 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
           // Pegar a primeira planilha
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
-          
-          // Converter para JSON - LER TODA A ESTRUTURA COMPLETA DA PLANILHA
-          // Usar range completo da planilha para garantir que nenhuma célula seja ignorada
-          let maxRangeColumns = 0;
-          try {
-            if (worksheet['!ref']) {
-              const range = XLSX.utils.decode_range(worksheet['!ref']);
-              maxRangeColumns = range.e.c + 1; // Número de colunas do range da planilha
-            }
-          } catch (e) {
-            // Se não conseguir decodificar o range, continuar sem ele
-            console.warn('Não foi possível decodificar o range da planilha:', e);
-          }
           
           // Usar defval: '' para garantir que todas as células sejam lidas
           // raw: true para preservar valores numéricos exatos da planilha
@@ -226,12 +206,6 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
               .replace(/\s+/g, ' ')
               .trim();
           };
-          
-          // Criar conjunto de nomes normalizados permitidos para comparação rápida
-          const colunasPermitidasNormalizadas = new Set(
-            colunasPermitidas.map(c => normalizeColName(c))
-          );
-          
           // Definir palavras-chave para matching flexível
           const palavrasChave: Record<string, string[][]> = {
             'dataVenda': [['data'], ['venda']],
@@ -352,17 +326,17 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
           // Processar TODAS as linhas (sem pular nenhuma)
           // Garantir que todas as linhas sejam processadas, mesmo as vazias
           const rows = jsonData.slice(1)
-            .map((row: any[], rowIndex: number) => {
-            const obj: Record<string, any> = {};
+            .map((row: any) => {
+              const obj: Record<string, any> = {};
               // Processar APENAS colunas permitidas (ignorar todas as outras)
               colunasMap.forEach(({ headerName }, colIndex) => {
                 // Ler valor da célula - preservar valor original (não converter)
                 const value = row && row[colIndex] !== undefined ? row[colIndex] : '';
                 // Preservar valor exato da planilha (não converter tipos)
                 obj[headerName] = value !== undefined && value !== null ? value : '';
+              });
+              return obj;
             });
-            return obj;
-          });
           
           // NÃO filtrar linhas vazias - manter TODAS as linhas da planilha
           // Isso garante que nenhuma linha seja ignorada

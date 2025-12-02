@@ -9,7 +9,7 @@ import { ArrowLeft, Plus, Edit, Trash2, Shield, DollarSign } from 'lucide-react'
 const CustomerSales = () => {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,7 +82,6 @@ const CustomerSales = () => {
         amount: '',
         product: '',
         region: '',
-        seller: '',
         status: 'completed',
         paymentMethod: '',
         cieloTerminalId: '',
@@ -185,7 +184,6 @@ const CustomerSales = () => {
     .reduce((sum, sale) => sum + sale.amount, 0);
 
   const manualSales = sales.filter(s => !s.id.startsWith('cielo_'));
-  const cieloSales = sales.filter(s => s.id.startsWith('cielo_'));
 
   return (
     <div className="space-y-6">
