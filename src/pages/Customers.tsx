@@ -23,6 +23,7 @@ const Customers = () => {
     name: '',
     email: '',
     phone: '',
+    cpfCnpj: '',
     status: 'active' as 'active' | 'inactive',
     region: '',
     username: '',
@@ -109,7 +110,7 @@ const Customers = () => {
 
   const handleAddTerminal = () => {
     if (!newTerminal.terminalId.trim()) {
-      alert('Por favor, informe o ID da maquininha.');
+      alert('Por favor, informe o ID da conta.');
       return;
     }
     
@@ -119,7 +120,7 @@ const Customers = () => {
         ...formData.cieloTerminals,
         {
           terminalId: newTerminal.terminalId.trim(),
-          name: newTerminal.name.trim() || `Maquininha ${formData.cieloTerminals.length + 1}`,
+          name: newTerminal.name.trim() || `Conta ${formData.cieloTerminals.length + 1}`,
         },
       ],
     });
@@ -184,7 +185,7 @@ const Customers = () => {
             cieloTerminals: formData.cieloTerminals,
           });
           // Não fechar o modal, apenas mostrar mensagem de sucesso
-          alert('Cliente criado com sucesso! Agora você pode adicionar planilhas para cada maquininha.');
+          alert('Cliente criado com sucesso! Agora você pode adicionar planilhas para cada conta.');
           return; // Não limpar o formulário ainda
         }
       }
@@ -215,7 +216,7 @@ const Customers = () => {
     if (terminals.length === 0 && customer.cieloTerminalId) {
       terminals.push({
         terminalId: customer.cieloTerminalId,
-        name: `Maquininha ${customer.name}`,
+        name: `Conta ${customer.name}`,
       });
     }
     
@@ -223,6 +224,7 @@ const Customers = () => {
       name: customer.name,
       email: customer.email,
       phone: customer.phone,
+      cpfCnpj: customer.cpfCnpj || '',
       status: customer.status,
       region: customer.region || '',
       username: customer.username || '',
@@ -343,8 +345,9 @@ const Customers = () => {
               <tr className="bg-black text-white">
                 <th className="text-left py-4 px-6 font-semibold">Nome</th>
                 <th className="text-left py-4 px-6 font-semibold">Email</th>
+                <th className="text-left py-4 px-6 font-semibold">CNPJ/CPF</th>
                 <th className="text-left py-4 px-6 font-semibold">Usuário</th>
-                <th className="text-left py-4 px-6 font-semibold">Maquininha</th>
+                <th className="text-left py-4 px-6 font-semibold">Conta</th>
                 <th className="text-left py-4 px-6 font-semibold">Telefone</th>
                 <th className="text-left py-4 px-6 font-semibold">Status</th>
                 <th className="text-left py-4 px-6 font-semibold">Planilha</th>
@@ -355,7 +358,7 @@ const Customers = () => {
             <tbody>
               {filteredCustomers.length === 0 ? (
                 <tr>
-                    <td colSpan={9} className="py-12 text-center">
+                    <td colSpan={10} className="py-12 text-center">
                     <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                     <p className="text-gray-600 text-lg font-medium mb-2">Nenhum cliente cadastrado</p>
                     <p className="text-gray-500 text-sm">O sistema está pronto para uso. Clique em "Novo Cliente" para começar.</p>
@@ -366,6 +369,13 @@ const Customers = () => {
                   <tr key={customer.id} className="border-b border-gray-200 hover:bg-gray-50">
                     <td className="py-4 px-6 text-gray-700 font-medium">{customer.name}</td>
                     <td className="py-4 px-6 text-gray-700">{customer.email}</td>
+                    <td className="py-4 px-6 text-gray-700">
+                      {customer.cpfCnpj ? (
+                        <span className="font-mono text-sm">{customer.cpfCnpj}</span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">-</span>
+                      )}
+                    </td>
                     <td className="py-4 px-6 text-gray-700">
                       {customer.username ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">
@@ -383,13 +393,13 @@ const Customers = () => {
                               <button
                                 onClick={() => navigate(`/terminal/${term.terminalId}`)}
                                 className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold flex items-center hover:bg-green-200 transition-colors cursor-pointer group"
-                                title={`Ver dashboard da maquininha: ${term.name || term.terminalId}`}
+                                title={`Ver dashboard da conta: ${term.name || term.terminalId}`}
                               >
                                 <CreditCard className="w-3 h-3 mr-1" />
                                 {term.terminalId}
                                 <ExternalLink className="w-2.5 h-2.5 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
                               </button>
-                              {/* Botão para editar cards da maquininha - Apenas Admin */}
+                              {/* Botão para editar cards da conta - Apenas Admin */}
                               {isAdmin() && (
                                 <button
                                   onClick={() => {
@@ -408,7 +418,7 @@ const Customers = () => {
                                     });
                                   }}
                                   className="p-1 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded transition-colors"
-                                  title="Editar Valores dos Cards desta Maquininha (Apenas Admin)"
+                                  title="Editar Valores dos Cards desta Conta (Apenas Admin)"
                                 >
                                   <Settings className="w-3 h-3" />
                                 </button>
@@ -420,7 +430,7 @@ const Customers = () => {
                         <button
                           onClick={() => navigate(`/terminal/${customer.cieloTerminalId}`)}
                           className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold flex items-center hover:bg-green-200 transition-colors cursor-pointer group"
-                          title="Ver dashboard da maquininha"
+                          title="Ver dashboard da conta"
                         >
                           <CreditCard className="w-3 h-3 mr-1" />
                           {customer.cieloTerminalId}
@@ -532,6 +542,34 @@ const Customers = () => {
                   />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-black mb-2">CNPJ/CPF</label>
+                  <input
+                    type="text"
+                    value={formData.cpfCnpj}
+                    onChange={(e) => {
+                      // Formatar automaticamente CNPJ/CPF
+                      let value = e.target.value.replace(/\D/g, '');
+                      if (value.length <= 11) {
+                        // CPF: 000.000.000-00
+                        value = value.replace(/(\d{3})(\d)/, '$1.$2');
+                        value = value.replace(/(\d{3})(\d)/, '$1.$2');
+                        value = value.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+                      } else {
+                        // CNPJ: 00.000.000/0000-00
+                        value = value.replace(/^(\d{2})(\d)/, '$1.$2');
+                        value = value.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
+                        value = value.replace(/\.(\d{3})(\d)/, '.$1/$2');
+                        value = value.replace(/(\d{4})(\d)/, '$1-$2');
+                      }
+                      setFormData({ ...formData, cpfCnpj: value });
+                    }}
+                    placeholder="00.000.000/0000-00 ou 000.000.000-00"
+                    maxLength={18}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Digite o CNPJ ou CPF do cliente</p>
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-black mb-2">Região</label>
                   <select
                     value={formData.region}
@@ -559,14 +597,14 @@ const Customers = () => {
                 </div>
               </div>
               
-              {/* Integração Cielo - Múltiplas Maquininhas */}
+              {/* Integração Cielo - Múltiplas Contas */}
               <div className="border-t border-gray-200 pt-4 mt-4">
                 <h3 className="text-lg font-semibold text-black mb-4 flex items-center">
                   <CreditCard className="w-5 h-5 mr-2" />
-                  Maquininhas Cielo
+                  Contas Cielo
                 </h3>
                 
-                {/* Lista de maquininhas adicionadas */}
+                {/* Lista de contas adicionadas */}
                 {formData.cieloTerminals.length > 0 && (
                   <div className="mb-4 space-y-2">
                     {formData.cieloTerminals.map((term, index) => (
@@ -584,7 +622,7 @@ const Customers = () => {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {/* Botão para fazer upload de planilha para esta maquininha */}
+                          {/* Botão para fazer upload de planilha para esta conta */}
                           {/* Aparece sempre, mas só funciona se o cliente tiver ID (já foi salvo) */}
                           <button
                             type="button"
@@ -607,7 +645,7 @@ const Customers = () => {
                             }`}
                             title={
                               editingCustomer && editingCustomer.id
-                                ? 'Enviar planilha para esta maquininha'
+                                ? 'Enviar planilha para esta conta'
                                 : 'Salve o cliente primeiro para adicionar planilha'
                             }
                             disabled={!editingCustomer || !editingCustomer.id}
@@ -619,7 +657,7 @@ const Customers = () => {
                             type="button"
                             onClick={() => handleRemoveTerminal(index)}
                             className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition-colors"
-                            title="Remover maquininha"
+                            title="Remover conta"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -629,12 +667,12 @@ const Customers = () => {
                   </div>
                 )}
                 
-                {/* Formulário para adicionar nova maquininha */}
+                {/* Formulário para adicionar nova conta */}
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-black mb-2">
-                        ID da Maquininha/Terminal Cielo
+                        ID da Conta/Terminal Cielo
                       </label>
                       <input
                         type="text"
@@ -663,10 +701,10 @@ const Customers = () => {
                     className="flex items-center px-4 py-2 bg-gray-200 text-black rounded-lg font-semibold hover:bg-gray-300 transition-colors"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Adicionar Maquininha
+                    Adicionar Conta
                   </button>
                   <p className="text-xs text-gray-500">
-                    Você pode adicionar múltiplas maquininhas para este cliente. As vendas de todas as maquininhas aparecerão automaticamente na dashboard.
+                    Você pode adicionar múltiplas contas para este cliente. As vendas de todas as contas aparecerão automaticamente na dashboard.
                   </p>
                 </div>
               </div>
@@ -747,7 +785,7 @@ const Customers = () => {
         />
       )}
 
-      {/* Modal de Planilha - Maquininha Específica */}
+      {/* Modal de Planilha - Conta Específica */}
       {selectedTerminalForSpreadsheet && (
         <CustomerSpreadsheet
           customerId={selectedTerminalForSpreadsheet.customerId}
@@ -853,7 +891,7 @@ const Customers = () => {
               </p>
               {selectedCustomerForCards.terminalId && (
                 <p className="text-sm text-gray-600 mb-4">
-                  Maquininha: <strong>{selectedCustomerForCards.terminalName || selectedCustomerForCards.terminalId}</strong>
+                  Conta: <strong>{selectedCustomerForCards.terminalName || selectedCustomerForCards.terminalId}</strong>
                 </p>
               )}
               <p className="text-xs text-gray-500 mb-4">

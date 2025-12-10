@@ -431,7 +431,7 @@ const CustomerSales = () => {
                 </div>
                 {customer.cieloTerminals && customer.cieloTerminals.length > 0 && (
                   <div>
-                    <label className="block text-sm font-medium text-black mb-2">Maquininha (opcional)</label>
+                    <label className="block text-sm font-medium text-black mb-2">Conta (opcional)</label>
                     <select
                       value={formData.cieloTerminalId}
                       onChange={(e) => setFormData({ ...formData, cieloTerminalId: e.target.value })}

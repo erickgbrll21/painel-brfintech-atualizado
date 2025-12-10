@@ -1,52 +1,164 @@
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, FileSpreadsheet, X, Download, Trash2, Check, Eye } from 'lucide-react';
-import { getSpreadsheetByCustomerId, getSpreadsheetByTerminalId, saveSpreadsheet, deleteSpreadsheet, SpreadsheetData, parseSpreadsheetToSales } from '../services/spreadsheetService';
+import { Upload, FileSpreadsheet, X, Download, Trash2, Check, Eye, Calendar, Edit2, Save } from 'lucide-react';
+import { getSpreadsheetByCustomerId, getSpreadsheetByTerminalId, saveSpreadsheet, deleteSpreadsheet, SpreadsheetData, parseSpreadsheetToSales, getAvailableMonths, getAvailableDays, getSpreadsheetByDate, calculateSpreadsheetMetrics } from '../services/spreadsheetService';
 import { useAuth } from '../context/AuthContext';
+import { getCustomerCardValues, saveCustomerCardValues, deleteCustomerCardValues } from '../services/customerCardValuesService';
 
 interface CustomerSpreadsheetProps {
   customerId: string;
   customerName: string;
-  terminalId?: string; // ID da maquininha (opcional)
-  terminalName?: string; // Nome da maquininha (opcional)
+  terminalId?: string; // ID da conta (opcional)
+  terminalName?: string; // Nome da conta (opcional)
   onClose: () => void;
 }
 
 const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalName, onClose }: CustomerSpreadsheetProps) => {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [spreadsheetData, setSpreadsheetData] = useState<SpreadsheetData | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<SpreadsheetData | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [referenceMonth, setReferenceMonth] = useState<string>('');
+  const [referenceDate, setReferenceDate] = useState<string>('');
+  const [spreadsheetType, setSpreadsheetType] = useState<'monthly' | 'daily'>('monthly');
+  const [availableDays, setAvailableDays] = useState<string[]>([]);
+  const [selectedDay, setSelectedDay] = useState<string>('');
+  const [showEditCardValues, setShowEditCardValues] = useState(false);
+  const [cardValues, setCardValues] = useState({
+    quantidadeVendas: '',
+    valorBruto: '',
+    taxa: '',
+    valorLiquido: '',
+  });
+  const [spreadsheetMetrics, setSpreadsheetMetrics] = useState<any>(null);
+  
+  // Função para formatar mês (YYYY-MM) para exibição (MM/YYYY)
+  const formatMonth = (month: string): string => {
+    if (!month) return '';
+    const [year, monthNum] = month.split('-');
+    const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    return `${monthNames[parseInt(monthNum) - 1]}/${year}`;
+  };
+  
+  // Função para obter mês atual no formato YYYY-MM
+  const getCurrentMonth = (): string => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+  
 
+  // Carregar meses disponíveis quando tipo mudar
   useEffect(() => {
-    let lastHash = '';
+    const months = getAvailableMonths(customerId, terminalId, spreadsheetType);
+    setAvailableMonths(months);
     
-    const checkAndLoadSpreadsheet = () => {
-      const data = terminalId 
-        ? getSpreadsheetByTerminalId(terminalId, customerId)
-        : getSpreadsheetByCustomerId(customerId);
-      const currentHash = data 
-        ? `${data.uploadedAt}-${data.data?.length || 0}` 
-        : '';
-      
-      // Só atualizar se mudou
-      if (currentHash !== lastHash) {
-        setSpreadsheetData(data);
-        lastHash = currentHash;
+    if (spreadsheetType === 'monthly') {
+      // Para mensais: limpar dias e selecionar primeiro mês se disponível
+      setAvailableDays([]);
+      setSelectedDay('');
+      if (months.length > 0 && !selectedMonth) {
+        setSelectedMonth(months[0]);
       }
-    };
-    
-    checkAndLoadSpreadsheet();
-    
-    // Recarregar a cada 5 segundos (reduzido de 2 para melhor performance)
-    const interval = setInterval(() => {
-      checkAndLoadSpreadsheet();
-    }, 5000);
-    
-    return () => clearInterval(interval);
-  }, [customerId]);
+    } else {
+      // Para diárias: limpar seleções
+      setSelectedDay('');
+      if (months.length > 0 && !selectedMonth) {
+        setSelectedMonth(months[0]);
+      }
+    }
+  }, [spreadsheetType, customerId, terminalId]);
+  
+  // Carregar dias quando mês mudar (apenas para diárias)
+  useEffect(() => {
+    if (spreadsheetType === 'daily' && selectedMonth) {
+      const days = getAvailableDays(customerId, terminalId, selectedMonth);
+      setAvailableDays(days);
+      // Limpar dia selecionado quando mês mudar
+      setSelectedDay('');
+      setSpreadsheetData(null);
+    }
+  }, [selectedMonth, spreadsheetType, customerId, terminalId]);
+  
+  // Carregar planilha mensal quando mês for selecionado
+  useEffect(() => {
+    if (spreadsheetType === 'monthly' && selectedMonth) {
+      const data = terminalId 
+        ? getSpreadsheetByTerminalId(terminalId, customerId, selectedMonth, 'monthly')
+        : getSpreadsheetByCustomerId(customerId, selectedMonth, 'monthly');
+      setSpreadsheetData(data);
+    } else if (spreadsheetType === 'monthly') {
+      setSpreadsheetData(null);
+    }
+  }, [selectedMonth, spreadsheetType, customerId, terminalId]);
+  
+  // Carregar planilha diária quando dia for selecionado
+  useEffect(() => {
+    if (spreadsheetType === 'daily' && selectedDay) {
+      const data = getSpreadsheetByDate(customerId, selectedDay, terminalId);
+        setSpreadsheetData(data);
+    } else if (spreadsheetType === 'daily') {
+      setSpreadsheetData(null);
+    }
+  }, [selectedDay, spreadsheetType, customerId, terminalId]);
+
+  // Calcular métricas da planilha quando ela mudar
+  useEffect(() => {
+    if (spreadsheetData && spreadsheetData.data && spreadsheetData.data.length > 0) {
+      const metrics = calculateSpreadsheetMetrics(spreadsheetData);
+      setSpreadsheetMetrics(metrics);
+      
+      // Carregar valores customizados específicos desta planilha
+      const customValues = getCustomerCardValues(
+        customerId, 
+        terminalId,
+        spreadsheetData.referenceMonth,
+        spreadsheetData.referenceDate,
+        spreadsheetData.type || 'monthly'
+      );
+      if (customValues) {
+        setCardValues({
+          quantidadeVendas: String(customValues.quantidadeVendas || ''),
+          valorBruto: String(customValues.valorBruto || ''),
+          taxa: String(customValues.taxa || ''),
+          valorLiquido: String(customValues.valorLiquido || ''),
+        });
+      } else {
+        // Usar valores calculados da planilha
+        setCardValues({
+          quantidadeVendas: String(metrics.totalVendas || ''),
+          valorBruto: String(metrics.valorBrutoTotal || ''),
+          taxa: String(metrics.taxaMedia || ''),
+          valorLiquido: String(metrics.valorLiquidoTotal || ''),
+        });
+      }
+    } else {
+      setSpreadsheetMetrics(null);
+      setCardValues({
+        quantidadeVendas: '',
+        valorBruto: '',
+        taxa: '',
+        valorLiquido: '',
+      });
+    }
+  }, [spreadsheetData, customerId, terminalId]);
+  
+  // Inicializar mês de referência e data com valores atuais
+  useEffect(() => {
+    if (!referenceMonth) {
+      setReferenceMonth(getCurrentMonth());
+    }
+    if (!referenceDate && spreadsheetType === 'daily') {
+      const today = new Date().toISOString().split('T')[0];
+      setReferenceDate(today);
+    }
+  }, [referenceMonth, referenceDate, spreadsheetType]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     // Verificar se é administrador antes de permitir upload
@@ -104,257 +216,103 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
             return;
           }
 
-          // Primeira linha são os cabeçalhos
+          // Primeira linha são os cabeçalhos - LER TODAS AS COLUNAS
           const headerRow = jsonData[0] as any[] || [];
           
-          // Definir APENAS as 12 colunas permitidas (estas são as únicas que serão lidas)
-          // Mapeamento exato das colunas permitidas com suas variações possíveis
-          // Expandido para cobrir mais variações de formatação
-          const colunasPermitidasMap: Record<string, string[]> = {
-            // 1. Data da venda
-            'dataVenda': [
-              'data da venda', 'data venda', 'data de venda', 'data venda', 
-              'data_da_venda', 'data_venda', 'data_de_venda',
-              'datavenda', 'datadavenda'
-            ],
-            // 2. Hora da venda
-            'horaVenda': [
-              'hora da venda', 'hora venda', 'hora de venda', 
-              'horario', 'horário', 'hora', 'hora venda',
-              'hora_da_venda', 'hora_venda', 'hora_de_venda',
-              'horavenda', 'horadavenda'
-            ],
-            // 3. Estabelecimento
-            'estabelecimento': [
-              'estabelecimento', 'nome estabelecimento', 'estabelecimento nome',
-              'estabelecimento_nome', 'nome_estabelecimento',
-              'estabelecimentonome'
-            ],
-            // 4. CPF/CNPJ do estabelecimento
-            'cpfCnpj': [
-              'cpf/cnpj do estabelecimento', 'cpf cnpj estabelecimento', 
-              'cpf/cnpj', 'cpf cnpj', 'cpfcnpj', 'cpf_cnpj',
-              'cpf/cnpj do estabelecimento', 'cpfcnpj estabelecimento',
-              'cpf_cnpj_estabelecimento', 'cpfcnpjestabelecimento'
-            ],
-            // 5. Forma de pagamento
-            'formaPagamento': [
-              'forma de pagamento', 'forma pagamento', 'formapagamento',
-              'forma_de_pagamento', 'forma_pagamento',
-              'tipo pagamento', 'tipo de pagamento', 'tipopagamento'
-            ],
-            // 6. Quantidade total de parcelas
-            'quantidadeParcelas': [
-              'quantidade total de parcelas', 'quantidade parcelas', 
-              'total parcelas', 'qtd parcelas', 'qtd total parcelas',
-              'quantidade_total_de_parcelas', 'quantidade_parcelas',
-              'total_parcelas', 'qtd_parcelas', 'parcelas'
-            ],
-            // 7. Bandeira
-            'bandeira': [
-              'bandeira', 'bandeira cartão', 'bandeira cartao', 
-              'bandeira_cartao', 'bandeira_cartão',
-              'bandeiracartao', 'bandeiracartão'
-            ],
-            // 8. Valor bruto
-            'valorBruto': [
-              'valor bruto', 'valor_bruto', 'valorbruto',
-              'valor bruto total', 'valor_bruto_total'
-            ],
-            // 9. Status da venda
-            'statusVenda': [
-              'status da venda', 'status venda', 'status de venda',
-              'status_da_venda', 'status_venda', 'status_de_venda',
-              'statusvenda', 'statusdavenda',
-              'situação', 'situacao', 'situação da venda'
-            ],
-            // 10. Tipo de lançamento
-            'tipoLancamento': [
-              'tipo de lançamento', 'tipo lançamento', 'tipo lancamento', 
-              'tipo de lancamento', 'tipolancamento',
-              'tipo_de_lancamento', 'tipo_lancamento',
-              'lançamento', 'lancamento', 'tipo lancamento'
-            ],
-            // 11. Data do lançamento
-            'dataLancamento': [
-              'data do lançamento', 'data lançamento', 'data lancamento', 
-              'data de lançamento', 'data de lancamento',
-              'data_do_lancamento', 'data_lancamento', 'data_de_lancamento',
-              'datalancamento', 'datadolancamento'
-            ],
-            // 12. Número da máquina
-            'numeroMaquina': [
-              'número da máquina', 'numero da maquina', 'número máquina', 
-              'numero maquina', 'num máquina', 'num maquina',
-              'numero_da_maquina', 'numero_maquina', 'num_maquina',
-              'numeromaquina', 'numerodamaquina',
-              'máquina', 'maquina', 'numero maquina'
-            ]
-          };
-          
-          // Criar lista plana de todas as variações para matching
-          const colunasPermitidas: string[] = [];
-          Object.values(colunasPermitidasMap).forEach(variacoes => {
-            colunasPermitidas.push(...variacoes);
-          });
-          
-          // Função para normalizar nome da coluna (remove acentos, caracteres especiais, espaços extras)
-          const normalizeColName = (name: string): string => {
-            return String(name || '').toLowerCase().trim()
-              .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-              .replace(/[^\w\s]/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-          };
-          // Definir palavras-chave para matching flexível
-          const palavrasChave: Record<string, string[][]> = {
-            'dataVenda': [['data'], ['venda']],
-            'horaVenda': [['hora'], ['venda']],
-            'estabelecimento': [['estabelecimento']],
-            'cpfCnpj': [['cpf'], ['cnpj'], ['cpf', 'cnpj']],
-            'formaPagamento': [['forma'], ['pagamento']],
-            'quantidadeParcelas': [['quantidade'], ['parcelas'], ['parcela']],
-            'bandeira': [['bandeira']],
-            'valorBruto': [['valor'], ['bruto']],
-            'statusVenda': [['status'], ['venda']],
-            'tipoLancamento': [['tipo'], ['lancamento'], ['lançamento']],
-            'dataLancamento': [['data'], ['lancamento'], ['lançamento']],
-            'numeroMaquina': [['numero'], ['maquina'], ['máquina'], ['num'], ['maquina']]
-          };
-          
-          // Mapear índices das colunas permitidas
-          // Usar Map para garantir ordem e evitar duplicatas
-          const colunasMap: Map<number, { headerName: string; key: string }> = new Map();
-          const headersPermitidos: string[] = [];
-          const colunasEncontradas = new Set<string>(); // Para evitar duplicatas
-          
-          console.log('=== PROCESSAMENTO DE COLUNAS ===');
-          console.log('Total de colunas na planilha:', headerRow.length);
-          console.log('Colunas encontradas na planilha:', headerRow.map((h, i) => `${i}: "${String(h || '').trim()}"`));
-          console.log('Colunas esperadas (12):', Object.keys(colunasPermitidasMap));
-          
-          // Processar cada coluna da planilha
+          // Extrair TODOS os cabeçalhos da planilha, preservando nomes originais
+          // Se uma coluna não tiver nome, usar um nome padrão baseado no índice
+          const headers: string[] = [];
           headerRow.forEach((headerValue, index) => {
-            if (headerValue !== undefined && headerValue !== null) {
-              const headerName = String(headerValue).trim();
-              if (!headerName) return;
-              
-              const normalized = normalizeColName(headerName);
-              
-              // Verificar se corresponde a alguma das 12 colunas permitidas
-              let colunaEncontrada: { key: string; variacao: string } | null = null;
-              
-              // Buscar em cada uma das 12 colunas permitidas
-              for (const [key, variacoes] of Object.entries(colunasPermitidasMap)) {
-                for (const variacao of variacoes) {
-                  const normalizedVariacao = normalizeColName(variacao);
-                  
-                  // 1. Match exato (mais preciso)
-                  if (normalized === normalizedVariacao) {
-                    colunaEncontrada = { key, variacao };
-                    break;
-                  }
-                  
-                  // 2. Match parcial: verificar se todas as palavras principais estão presentes
-                  const palavrasVariacao = normalizedVariacao.split(' ').filter(p => p.length > 2);
-                  const palavrasHeader = normalized.split(' ').filter(p => p.length > 2);
-                  
-                  // Aceitar se todas as palavras principais estiverem presentes
-                  if (palavrasVariacao.length > 0 && palavrasVariacao.every(p => palavrasHeader.includes(p))) {
-                    colunaEncontrada = { key, variacao };
-                    break;
-                  }
-                  
-                  // 3. Match por palavras-chave importantes (mais flexível)
-                  const chavesEsperadas = palavrasChave[key];
-                  if (chavesEsperadas) {
-                    // Verificar se pelo menos um conjunto de palavras-chave está presente
-                    const matchChaves = chavesEsperadas.some(conjunto => 
-                      conjunto.every(palavra => normalized.includes(normalizeColName(palavra)))
-                    );
-                    
-                    if (matchChaves) {
-                      colunaEncontrada = { key, variacao };
-                      break;
-                    }
-                  }
-                }
-                
-                if (colunaEncontrada) break;
-              }
-              
-              if (colunaEncontrada && !colunasEncontradas.has(colunaEncontrada.key)) {
-                // Coluna permitida encontrada e ainda não foi mapeada
-                colunasMap.set(index, { headerName, key: colunaEncontrada.key });
-                headersPermitidos.push(headerName);
-                colunasEncontradas.add(colunaEncontrada.key);
-                console.log(`✓ Coluna permitida encontrada: "${headerName}" → ${colunaEncontrada.key}`);
-              } else if (colunaEncontrada && colunasEncontradas.has(colunaEncontrada.key)) {
-                // Coluna já foi encontrada antes (duplicata)
-                console.log(`⚠ Coluna duplicada IGNORADA: "${headerName}" (já existe ${colunaEncontrada.key})`);
-              } else {
-                // Coluna não permitida - IGNORAR
-                console.log(`✗ Coluna IGNORADA: "${headerName}" (normalizada: "${normalized}")`);
-                // Mostrar sugestões de colunas próximas para debug
-                const palavrasHeader = normalized.split(' ').filter(p => p.length > 2);
-                const colunasProximas = Object.keys(colunasPermitidasMap).filter(key => {
-                  const chaves = palavrasChave[key];
-                  if (!chaves) return false;
-                  return chaves.some(conjunto => 
-                    conjunto.some(palavra => palavrasHeader.includes(normalizeColName(palavra)))
-                  );
-                });
-                if (colunasProximas.length > 0) {
-                  console.log(`   Sugestão: pode ser uma das colunas: ${colunasProximas.join(', ')}`);
-                }
-              }
+            if (headerValue !== undefined && headerValue !== null && String(headerValue).trim() !== '') {
+              // Preservar nome original da coluna exatamente como está na planilha
+              headers.push(String(headerValue).trim());
+            } else {
+              // Se a coluna não tiver nome, criar um nome padrão
+              headers.push(`Coluna ${index + 1}`);
             }
           });
           
-          console.log(`=== RESULTADO ===`);
-          console.log(`Total de colunas permitidas encontradas: ${headersPermitidos.length} de 12 esperadas`);
-          console.log('Colunas encontradas:', Array.from(colunasEncontradas));
-          console.log('Headers mapeados:', headersPermitidos);
-          
-          // Validar que encontramos pelo menos algumas colunas essenciais
-          if (headersPermitidos.length === 0) {
-            setError('Nenhuma coluna permitida encontrada na planilha. O sistema deve ler APENAS as seguintes 12 colunas: 1) Data da venda, 2) Hora da venda, 3) Estabelecimento, 4) CPF/CNPJ do estabelecimento, 5) Forma de pagamento, 6) Quantidade total de parcelas, 7) Bandeira, 8) Valor bruto, 9) Status da venda, 10) Tipo de lançamento, 11) Data do lançamento, 12) Número da máquina. Qualquer outra coluna será ignorada.');
-            setIsUploading(false);
-            return;
+          // Se não encontrou cabeçalhos, criar cabeçalhos padrão baseados no número de colunas
+          if (headers.length === 0 && jsonData.length > 0) {
+            const firstRow = jsonData[0] as any[] || [];
+            for (let i = 0; i < firstRow.length; i++) {
+              headers.push(`Coluna ${i + 1}`);
+            }
           }
+          
+          // Determinar o número máximo de colunas em todas as linhas
+          let maxColumns = headers.length;
+          jsonData.forEach((row: any) => {
+            if (Array.isArray(row) && row.length > maxColumns) {
+              maxColumns = row.length;
+            }
+          });
+          
+          // Garantir que temos cabeçalhos para todas as colunas
+          while (headers.length < maxColumns) {
+            headers.push(`Coluna ${headers.length + 1}`);
+          }
+          
+          console.log('=== LEITURA COMPLETA DA PLANILHA ===');
+          console.log(`Total de colunas encontradas: ${headers.length}`);
+          console.log('Cabeçalhos:', headers);
+          console.log(`Total de linhas (incluindo cabeçalho): ${jsonData.length}`);
           
           // Processar TODAS as linhas (sem pular nenhuma)
           // Garantir que todas as linhas sejam processadas, mesmo as vazias
-          const rows = jsonData.slice(1)
-            .map((row: any) => {
-              const obj: Record<string, any> = {};
-              // Processar APENAS colunas permitidas (ignorar todas as outras)
-              colunasMap.forEach(({ headerName }, colIndex) => {
-                // Ler valor da célula - preservar valor original (não converter)
-                const value = row && row[colIndex] !== undefined ? row[colIndex] : '';
-                // Preservar valor exato da planilha (não converter tipos)
-                obj[headerName] = value !== undefined && value !== null ? value : '';
-              });
-              return obj;
+          // Preservar TODOS os valores exatamente como estão na planilha
+          const rows = jsonData.slice(1).map((row: any) => {
+            const obj: Record<string, any> = {};
+            
+            // Processar TODAS as colunas, não apenas algumas
+            headers.forEach((headerName, colIndex) => {
+              // Ler valor da célula - preservar valor original exatamente como está
+              let value: any = '';
+              
+              if (Array.isArray(row)) {
+                // Se a linha é um array, pegar o valor pelo índice
+                value = row[colIndex];
+              } else if (typeof row === 'object' && row !== null) {
+                // Se a linha é um objeto, tentar pegar pelo nome da coluna
+                value = row[headerName] !== undefined ? row[headerName] : row[colIndex];
+              }
+              
+              // Preservar valor exato da planilha:
+              // - Se for número, manter como número
+              // - Se for string, manter como string
+              // - Se for data, manter como está
+              // - Se for null/undefined, usar string vazia
+              if (value === null || value === undefined) {
+                obj[headerName] = '';
+              } else {
+                // Preservar tipo original - não converter nada
+                obj[headerName] = value;
+              }
             });
+            
+            return obj;
+          });
           
           // NÃO filtrar linhas vazias - manter TODAS as linhas da planilha
           // Isso garante que nenhuma linha seja ignorada
           console.log(`Total de linhas processadas: ${rows.length} (incluindo linhas vazias)`);
-          
-          // Usar APENAS os headers permitidos (ignorar todas as outras colunas)
-          const headers = headersPermitidos;
-          
-          console.log(`Planilha processada: ${rows.length} linhas, ${headers.length} colunas permitidas`);
+          console.log(`Total de colunas processadas: ${headers.length}`);
+          console.log(`Planilha processada completamente: ${rows.length} linhas × ${headers.length} colunas`);
 
           // Processar vendas estruturadas
           const sales = parseSpreadsheetToSales(rows, headers, customerId);
+
+          // Usar mês de referência selecionado ou mês atual
+          const monthToUse = referenceMonth || getCurrentMonth();
 
           const spreadsheet: SpreadsheetData = {
             customerId,
             terminalId: terminalId || undefined,
             fileName: file.name,
             uploadedAt: new Date().toISOString(),
+            referenceMonth: monthToUse,
+            referenceDate: referenceDate || undefined, // Sempre salvar a data selecionada
+            type: spreadsheetType,
             data: rows,
             headers,
             sales,
@@ -401,13 +359,85 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     if (!previewData) return;
     
     try {
-      saveSpreadsheet(previewData);
-      setSpreadsheetData(previewData);
+      // Garantir que o referenceMonth está definido
+      // IMPORTANTE: Para planilhas diárias, garantir que referenceDate está definido
+      const finalReferenceDate = spreadsheetType === 'daily' 
+        ? (referenceDate || previewData.referenceDate || new Date().toISOString().split('T')[0])
+        : undefined;
+      
+      const spreadsheetToSave = {
+        ...previewData,
+        referenceMonth: referenceMonth || getCurrentMonth(),
+        referenceDate: finalReferenceDate,
+        type: spreadsheetType,
+      };
+      
+      saveSpreadsheet(spreadsheetToSave);
+      
+      // Recarregar meses e dias disponíveis baseado no tipo
+      if (spreadsheetToSave.type === 'daily') {
+        const days = getAvailableDays(customerId, terminalId, spreadsheetToSave.referenceMonth);
+        setAvailableDays(days);
+        
+        // Selecionar o dia da planilha salva
+        if (spreadsheetToSave.referenceDate && days.includes(spreadsheetToSave.referenceDate)) {
+          setSelectedDay(spreadsheetToSave.referenceDate);
+        } else if (days.length > 0) {
+          setSelectedDay(days[0]);
+        }
+        
+        // Recarregar meses também
+        const months = getAvailableMonths(customerId, terminalId, 'daily');
+        setAvailableMonths(months);
+        
+        // Selecionar o mês da planilha salva
+        const savedMonth = spreadsheetToSave.referenceMonth;
+        if (months.includes(savedMonth)) {
+          setSelectedMonth(savedMonth);
+        } else if (months.length > 0) {
+          setSelectedMonth(months[0]);
+        }
+      } else {
+        // Recarregar meses disponíveis
+        const months = getAvailableMonths(customerId, terminalId, 'monthly');
+        setAvailableMonths(months);
+        
+        // Selecionar o mês da planilha salva
+        const savedMonth = spreadsheetToSave.referenceMonth;
+        if (months.includes(savedMonth)) {
+          setSelectedMonth(savedMonth);
+        } else if (months.length > 0) {
+          setSelectedMonth(months[0]);
+        }
+      }
+      
+      setSpreadsheetData(spreadsheetToSave);
       setPreviewData(null);
       setShowPreview(false);
       
+      // Mostrar mensagem de sucesso baseada no tipo
+      const dataLabel = spreadsheetToSave.referenceDate 
+        ? formatDateLocal(spreadsheetToSave.referenceDate)
+        : spreadsheetToSave.referenceMonth?.split('-').reverse().join('/');
+      
+      if (spreadsheetToSave.type === 'daily') {
+        alert(`✅ Planilha diária adicionada com sucesso!\n\nData: ${dataLabel}\nArquivo: ${spreadsheetToSave.fileName}\n\nVocê pode adicionar mais planilhas diárias para outros dias.`);
+        // Manter o tipo como 'daily' para permitir adicionar mais planilhas diárias
+        // Apenas resetar a data de referência para permitir selecionar um novo dia
+        setReferenceDate('');
+        // Manter o mês atual ou o mês da planilha salva
+        if (spreadsheetToSave.referenceMonth) {
+          setReferenceMonth(spreadsheetToSave.referenceMonth);
+        }
+      } else {
+        alert(`✅ Planilha mensal salva com sucesso!\n\nMês: ${dataLabel}\nArquivo: ${spreadsheetToSave.fileName}\n\nSe já existia uma planilha mensal deste mês, ela foi substituída.`);
+        // Resetar tipo para mensal apenas se for planilha mensal
+        setSpreadsheetType('monthly');
+        setReferenceDate('');
+        setReferenceMonth(getCurrentMonth());
+      }
+      
       // Disparar evento customizado para atualizar dashboards em tempo real
-      // Usar setTimeout para garantir que o localStorage foi atualizado
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('spreadsheetUpdated', { 
           detail: { 
@@ -445,6 +475,118 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     XLSX.writeFile(wb, spreadsheetData.fileName || `planilha_${customerName}.xlsx`);
   };
 
+  const handleOpenEditCardValues = () => {
+    if (spreadsheetData && spreadsheetMetrics) {
+      // Carregar valores customizados específicos desta planilha
+      const customValues = getCustomerCardValues(
+        customerId, 
+        terminalId,
+        spreadsheetData.referenceMonth,
+        spreadsheetData.referenceDate,
+        spreadsheetData.type || 'monthly'
+      );
+      if (customValues) {
+        setCardValues({
+          quantidadeVendas: String(customValues.quantidadeVendas || ''),
+          valorBruto: String(customValues.valorBruto || ''),
+          taxa: String(customValues.taxa || ''),
+          valorLiquido: String(customValues.valorLiquido || ''),
+        });
+      } else {
+        setCardValues({
+          quantidadeVendas: String(spreadsheetMetrics.totalVendas || ''),
+          valorBruto: String(spreadsheetMetrics.valorBrutoTotal || ''),
+          taxa: String(spreadsheetMetrics.taxaMedia || ''),
+          valorLiquido: String(spreadsheetMetrics.valorLiquidoTotal || ''),
+        });
+      }
+      setShowEditCardValues(true);
+    }
+  };
+
+  const handleSaveCardValues = () => {
+    if (!spreadsheetData) return;
+    
+    try {
+      const values = {
+        quantidadeVendas: parseFloat(cardValues.quantidadeVendas.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
+        valorBruto: parseFloat(cardValues.valorBruto.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
+        taxa: parseFloat(cardValues.taxa.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
+        valorLiquido: parseFloat(cardValues.valorLiquido.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
+      };
+
+      saveCustomerCardValues(
+        customerId, 
+        values, 
+        user?.id, 
+        terminalId,
+        spreadsheetData.referenceMonth,
+        spreadsheetData.referenceDate,
+        spreadsheetData.type || 'monthly'
+      );
+      setShowEditCardValues(false);
+      
+      // Disparar evento para atualizar dashboards
+      window.dispatchEvent(new CustomEvent('cardValuesUpdated', { 
+        detail: { 
+          customerId, 
+          terminalId,
+          referenceMonth: spreadsheetData.referenceMonth,
+          referenceDate: spreadsheetData.referenceDate,
+          type: spreadsheetData.type || 'monthly'
+        } 
+      }));
+      
+      alert('✅ Valores dos cards salvos com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar valores dos cards:', error);
+      alert('❌ Erro ao salvar valores dos cards. Tente novamente.');
+    }
+  };
+
+  const handleDeleteCardValues = () => {
+    if (!spreadsheetData) return;
+    
+    if (window.confirm('Tem certeza que deseja remover os valores customizados dos cards? Eles voltarão a ser calculados automaticamente da planilha.')) {
+      try {
+        deleteCustomerCardValues(
+          customerId, 
+          terminalId,
+          spreadsheetData.referenceMonth,
+          spreadsheetData.referenceDate,
+          spreadsheetData.type || 'monthly'
+        );
+        setShowEditCardValues(false);
+        
+        // Recarregar valores da planilha
+        if (spreadsheetMetrics) {
+          setCardValues({
+            quantidadeVendas: String(spreadsheetMetrics.totalVendas || ''),
+            valorBruto: String(spreadsheetMetrics.valorBrutoTotal || ''),
+            taxa: String(spreadsheetMetrics.taxaMedia || ''),
+            valorLiquido: String(spreadsheetMetrics.valorLiquidoTotal || ''),
+          });
+        }
+        
+        // Disparar evento para atualizar dashboards
+        window.dispatchEvent(new CustomEvent('cardValuesUpdated', { 
+          detail: { 
+            customerId, 
+            terminalId,
+            referenceMonth: spreadsheetData.referenceMonth,
+            referenceDate: spreadsheetData.referenceDate,
+            type: spreadsheetData.type || 'monthly'
+          } 
+        }));
+        
+        alert('✅ Valores customizados removidos. Os cards voltarão a usar valores da planilha.');
+      } catch (error) {
+        console.error('Erro ao deletar valores dos cards:', error);
+        alert('❌ Erro ao remover valores customizados. Tente novamente.');
+      }
+    }
+  };
+
   return (
     <>
       {/* Modal de Prévia */}
@@ -473,9 +615,52 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
             {/* Conteúdo da Prévia */}
             <div className="flex-1 overflow-auto p-4 md:p-6">
               <div className="mb-4 p-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-800 font-medium">
+                <p className="text-sm text-blue-800 font-medium mb-3">
                   Revise os dados abaixo antes de salvar. Esta planilha será vinculada ao cliente <strong>{customerName}</strong>.
                 </p>
+                 <div className="mt-3 space-y-4">
+                   <div>
+                     <label className="block text-sm font-medium text-blue-900 mb-2">
+                       Tipo de Planilha *
+                     </label>
+                     <select
+                       value={spreadsheetType}
+                       onChange={(e) => setSpreadsheetType(e.target.value as 'monthly' | 'daily')}
+                       className="w-full px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
+                     >
+                       <option value="monthly">📊 Mensal - Resumo do mês completo</option>
+                       <option value="daily">📅 Diária - Vendas de um dia específico</option>
+                     </select>
+                     <p className="text-xs text-blue-700 mt-1">
+                       Escolha se esta planilha contém dados mensais ou de um dia específico
+                     </p>
+                   </div>
+                   
+                   <div>
+                     <label className="block text-sm font-medium text-blue-900 mb-2">
+                       Dia de Referência *
+                     </label>
+                     <input
+                       type="date"
+                       value={referenceDate}
+                       onChange={(e) => {
+                         setReferenceDate(e.target.value);
+                         // Atualizar referenceMonth automaticamente baseado na data
+                         if (e.target.value) {
+                           const [year, month] = e.target.value.split('-');
+                           setReferenceMonth(`${year}-${month}`);
+                         }
+                       }}
+                       required
+                       className="w-full px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
+                     />
+                     <p className="text-xs text-blue-700 mt-1">
+                       {spreadsheetType === 'monthly' 
+                         ? 'Selecione qualquer dia do mês de referência (apenas mês/ano será usado)'
+                         : 'Selecione o dia específico desta planilha diária'}
+                     </p>
+                   </div>
+                 </div>
               </div>
 
               {/* Tabela de Prévia - Todas as Colunas */}
@@ -546,26 +731,145 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg border-2 border-black w-full max-w-6xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 md:p-6 border-b-2 border-black">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between p-4 md:p-6 border-b-2 border-black flex-wrap gap-4">
+          <div className="flex items-center gap-3 flex-1">
             <FileSpreadsheet className="w-6 h-6 md:w-8 md:h-8 text-black" />
-            <div>
+            <div className="flex-1">
               <h2 className="text-lg md:text-xl font-bold text-black">
-                Planilha - {terminalName ? `${terminalName} (${customerName})` : customerName}
+                {spreadsheetType === 'monthly' ? '📊 Planilhas Mensais' : '📅 Planilhas Diárias'} - {terminalName ? `${terminalName} (${customerName})` : customerName}
               </h2>
               {spreadsheetData && (
                 <p className="text-sm text-gray-600">
                   {spreadsheetData.fileName} • {new Date(spreadsheetData.uploadedAt).toLocaleDateString('pt-BR')}
+                  {spreadsheetData.referenceDate && spreadsheetType === 'daily' && (
+                    <span className="ml-2 font-semibold text-green-700">
+                      📅 {formatDateLocal(spreadsheetData.referenceDate)}
+                    </span>
+                  )}
+                  {spreadsheetData.referenceMonth && spreadsheetType === 'monthly' && (
+                    <span className="ml-2 font-semibold text-blue-700">
+                      📊 {formatMonth(spreadsheetData.referenceMonth)}
+                    </span>
+                  )}
                 </p>
               )}
             </div>
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Seletor de Tipo de Planilha - Visível para todos */}
+            <select
+              value={spreadsheetType}
+                onChange={(e) => {
+                  setSpreadsheetType(e.target.value as 'monthly' | 'daily');
+                  setSelectedMonth('');
+                  setSelectedDay('');
+                }}
+              className="px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors bg-white font-semibold text-sm"
+              title={isAdmin() ? "Selecione o tipo de planilha para gerenciar" : "Selecione o tipo de planilha para visualizar"}
+            >
+              <option value="monthly">📊 Mensal</option>
+              <option value="daily">📅 Diária</option>
+            </select>
+            
+            {/* Seletor de Mês - Para ambos os tipos */}
+            {spreadsheetType === 'monthly' && availableMonths.length > 0 && (
+              <select
+                value={selectedMonth}
+                onChange={(e) => {
+                  const monthValue = e.target.value;
+                  setSelectedMonth(monthValue);
+                  // Carregar planilha imediatamente
+                  if (monthValue) {
+                    const data = terminalId 
+                      ? getSpreadsheetByTerminalId(terminalId, customerId, monthValue, 'monthly')
+                      : getSpreadsheetByCustomerId(customerId, monthValue, 'monthly');
+                    setSpreadsheetData(data);
+                  } else {
+                    setSpreadsheetData(null);
+                  }
+                }}
+                className="px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors bg-white font-semibold"
+                title="Selecione o mês para visualizar a planilha mensal"
+              >
+                <option value="">Selecione o mês</option>
+                {availableMonths.map(month => (
+                  <option key={month} value={month}>
+                    📊 {formatMonth(month)}
+                  </option>
+                ))}
+              </select>
+            )}
+            
+            {/* Seletor de Mês - Para planilhas diárias */}
+            {spreadsheetType === 'daily' && availableMonths.length > 0 && (
+              <select
+                value={selectedMonth}
+                onChange={(e) => {
+                  const monthValue = e.target.value;
+                  setSelectedMonth(monthValue);
+                  setSelectedDay(''); // Limpar dia ao mudar mês
+                }}
+                className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-gray-500 transition-colors bg-white"
+                title="Selecione o mês para filtrar os dias"
+              >
+                <option value="">Selecione o mês</option>
+                {availableMonths.map(month => (
+                  <option key={month} value={month}>
+                    {formatMonth(month)}
+                  </option>
+                ))}
+              </select>
+            )}
+            
+            {/* Seletor de Dia - Apenas para planilhas diárias */}
+            {spreadsheetType === 'daily' && selectedMonth && availableDays.length > 0 && (
+              <select
+                value={selectedDay}
+                onChange={(e) => {
+                  const dayValue = e.target.value;
+                  setSelectedDay(dayValue);
+                  // Carregar planilha imediatamente quando selecionar o dia
+                  if (dayValue) {
+                    const data = getSpreadsheetByDate(customerId, dayValue, terminalId);
+                    setSpreadsheetData(data);
+                  } else {
+                    setSpreadsheetData(null);
+                  }
+                }}
+                className="px-4 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500 transition-colors bg-white font-semibold"
+                title="Selecione o dia para visualizar a planilha diária"
+              >
+                <option value="">Selecione o dia</option>
+                {availableDays.map(day => {
+                  // Formatar data sem problemas de timezone
+                  const parts = day.split('-');
+                  let formattedDate = day;
+                  if (parts.length === 3) {
+                    const [year, month, dayNum] = parts;
+                    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(dayNum));
+                    formattedDate = date.toLocaleDateString('pt-BR', {
+                      weekday: 'short',
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric'
+                    });
+                  }
+                  return (
+                    <option key={day} value={day}>
+                      📅 {formattedDate}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+            
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <X className="w-5 h-5 md:w-6 md:h-6 text-black" />
           </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -576,11 +880,116 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
             </div>
           )}
 
+          {/* Visualização de Dias Disponíveis - Apenas para planilhas diárias */}
+          {spreadsheetType === 'daily' && selectedMonth && availableDays.length > 0 && (
+            <div className="mb-6 bg-green-50 border-2 border-green-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Calendar className="w-5 h-5 text-green-700" />
+                <h3 className="text-lg font-bold text-green-900">
+                  Selecione o Dia para Visualizar a Planilha
+                </h3>
+                <span className="ml-auto text-sm text-green-700 font-semibold">
+                  {availableDays.length} {availableDays.length === 1 ? 'dia disponível' : 'dias disponíveis'}
+                </span>
+              </div>
+              
+              {/* Lista de Dias em Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {availableDays.map(day => {
+                  // Formatar data sem problemas de timezone
+                  const parts = day.split('-');
+                  let formattedDate = day;
+                  let weekday = '';
+                  if (parts.length === 3) {
+                    const [year, month, dayNum] = parts;
+                    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(dayNum));
+                    formattedDate = date.toLocaleDateString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric'
+                    });
+                    weekday = date.toLocaleDateString('pt-BR', { weekday: 'short' });
+                  }
+                  const isSelected = selectedDay === day;
+                  
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => {
+                        // Atualizar dia selecionado e carregar planilha imediatamente
+                        setSelectedDay(day);
+                        const data = getSpreadsheetByDate(customerId, day, terminalId);
+                        setSpreadsheetData(data);
+                      }}
+                      className={`p-4 rounded-lg border-2 transition-all text-center ${
+                        isSelected
+                          ? 'bg-green-600 text-white border-green-700 shadow-lg scale-105 font-bold'
+                          : 'bg-white text-green-700 border-green-300 hover:bg-green-100 hover:border-green-400 hover:shadow-md'
+                      }`}
+                    >
+                      <div className={`text-xs font-semibold uppercase mb-1 ${isSelected ? 'text-green-100' : 'text-green-600'}`}>
+                        {weekday}
+                      </div>
+                      <div className={`text-base font-bold ${isSelected ? 'text-white' : 'text-green-800'}`}>
+                        {formattedDate}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <p className="mt-4 text-sm text-green-700 text-center font-medium">
+                {selectedDay 
+                  ? `✅ Dia selecionado: ${formatDateLocal(selectedDay)}`
+                  : '👆 Clique em um dia acima para visualizar a planilha correspondente'}
+              </p>
+            </div>
+          )}
+          
+
           {!spreadsheetData ? (
             <div className="flex flex-col items-center justify-center py-12">
               <FileSpreadsheet className="w-16 h-16 md:w-20 md:h-20 text-gray-400 mb-4" />
-              <p className="text-gray-600 mb-2 text-center font-medium">Nenhuma planilha carregada para este cliente</p>
-              <p className="text-gray-500 mb-6 text-center text-sm">Envie uma planilha Excel (.xlsx ou .xls) com tamanho máximo de 5MB</p>
+              <p className="text-gray-600 mb-2 text-center font-medium">
+                {spreadsheetType === 'daily' 
+                  ? (selectedMonth 
+                      ? (selectedDay 
+                          ? `Nenhuma planilha encontrada para o dia ${formatDateLocal(selectedDay)}. Verifique se a planilha foi salva corretamente.`
+                          : availableDays.length > 0
+                            ? 'Selecione um dia no seletor acima para visualizar a planilha'
+                            : 'Nenhuma planilha diária encontrada para o mês selecionado')
+                      : availableMonths.length > 0
+                        ? 'Selecione um mês para ver os dias disponíveis'
+                        : 'Nenhuma planilha diária carregada para este cliente')
+                  : (selectedMonth 
+                      ? 'Nenhuma planilha encontrada para o mês selecionado' 
+                      : availableMonths.length > 0
+                        ? 'Selecione um mês para visualizar a planilha'
+                        : 'Nenhuma planilha carregada para este cliente')}
+              </p>
+              {spreadsheetType === 'daily' && availableDays.length > 0 ? (
+                <div className="mt-4">
+                  <p className="text-gray-500 mb-4 text-center text-sm">
+                    {availableDays.length} {availableDays.length === 1 ? 'dia disponível' : 'dias disponíveis'} com planilhas diárias
+                  </p>
+                  <p className="text-gray-500 mb-4 text-center text-sm">
+                    Selecione um dia no seletor acima para visualizar a planilha
+                  </p>
+                </div>
+              ) : availableMonths.length > 0 ? (
+                <div className="mt-4">
+                  <p className="text-gray-500 mb-4 text-center text-sm">
+                    Selecione outro mês no seletor acima
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-gray-500 mb-6 text-center text-sm">
+                    {isAdmin() 
+                      ? 'Envie uma planilha Excel (.xlsx ou .xls) com tamanho máximo de 5MB'
+                      : 'Aguardando administrador enviar planilha'}
+                  </p>
+                  {isAdmin() && (
               <label className="cursor-pointer">
                 <input
                   type="file"
@@ -594,12 +1003,27 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                   <span>{isUploading ? 'Carregando...' : 'Enviar Planilha Excel'}</span>
                 </div>
               </label>
+                  )}
+                </>
+              )}
             </div>
           ) : (
             <div>
               {/* Actions - Apenas para Administradores */}
               {isAdmin() && (
-                <div className="flex flex-wrap gap-2 mb-4">
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FileSpreadsheet className="w-5 h-5 text-blue-700" />
+                    <h4 className="font-semibold text-blue-900">Gerenciar Planilhas</h4>
+                  </div>
+                  
+                  {/* Informação sobre tipos de planilha */}
+                  <div className="mb-3 text-sm text-blue-800 space-y-1">
+                    <p>• <strong>Planilha Mensal:</strong> 1 por mês (novo upload substitui a anterior)</p>
+                    <p>• <strong>Planilha Diária:</strong> Múltiplas permitidas (novo upload adiciona nova entrada)</p>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2">
                   <label className="cursor-pointer">
                     <input
                       type="file"
@@ -610,27 +1034,41 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                     />
                     <div className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-semibold">
                       <Upload className="w-4 h-4" />
-                      <span>{isUploading ? 'Carregando...' : 'Substituir Planilha'}</span>
+                        <span>{isUploading ? 'Carregando...' : 'Enviar Nova Planilha'}</span>
                     </div>
                   </label>
                   <button
                     onClick={handleDelete}
                     className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm"
+                      title="Excluir planilha atual exibida"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Excluir
+                      Excluir Esta Planilha
                   </button>
+                  </div>
                 </div>
               )}
-              {/* Botão de Download disponível para todos */}
+              {/* Botões de Ação - Disponíveis para todos */}
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
                   onClick={handleDownload}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-black rounded-lg hover:bg-gray-300 transition-colors text-sm"
+                  className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-semibold"
+                  title="Baixar planilha atual"
                 >
                   <Download className="w-4 h-4" />
-                  Baixar
+                  Baixar Planilha
                 </button>
+                {/* Botão de Editar Valores dos Cards - Apenas quando há planilha selecionada */}
+                {spreadsheetData && spreadsheetMetrics && (
+                  <button
+                    onClick={handleOpenEditCardValues}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-semibold"
+                    title="Editar valores dos cards KPI"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    Editar Valores dos Cards
+                  </button>
+                )}
               </div>
 
               {/* Table - Todas as Colunas da Planilha */}
@@ -689,9 +1127,181 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
           )}
         </div>
       </div>
+
+      {/* Modal de Edição de Valores dos Cards */}
+      {showEditCardValues && spreadsheetData && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-lg border-2 border-black w-full max-w-2xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 md:p-6 border-b-2 border-black">
+              <div className="flex items-center gap-3">
+                <Edit2 className="w-6 h-6 md:w-8 md:h-8 text-black" />
+                <div>
+                  <h2 className="text-lg md:text-xl font-bold text-black">Editar Valores dos Cards</h2>
+                  <p className="text-sm text-gray-600">
+                    {spreadsheetType === 'monthly' 
+                      ? `Planilha Mensal - ${formatMonth(selectedMonth)}`
+                      : `Planilha Diária - ${formatDateLocal(selectedDay)}`}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEditCardValues(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 md:w-6 md:h-6 text-black" />
+              </button>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="flex-1 overflow-auto p-4 md:p-6">
+              <div className="mb-4 p-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>Valores calculados da planilha:</strong> Os valores abaixo foram calculados automaticamente da planilha selecionada. 
+                  Você pode editá-los manualmente se necessário.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {/* Quantidade de Vendas */}
+                <div>
+                  <label className="block text-sm font-medium text-black mb-2">
+                    Quantidade de Vendas
+                  </label>
+                  <input
+                    type="text"
+                    value={cardValues.quantidadeVendas}
+                    onChange={(e) => setCardValues({ ...cardValues, quantidadeVendas: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                    placeholder="0"
+                  />
+                  {spreadsheetMetrics && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valor calculado: {spreadsheetMetrics.totalVendas.toLocaleString('pt-BR')}
+                    </p>
+                  )}
+                </div>
+
+                {/* Valor Bruto */}
+                <div>
+                  <label className="block text-sm font-medium text-black mb-2">
+                    Valor Bruto (R$)
+                  </label>
+                  <input
+                    type="text"
+                    value={cardValues.valorBruto}
+                    onChange={(e) => setCardValues({ ...cardValues, valorBruto: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                    placeholder="0,00"
+                  />
+                  {spreadsheetMetrics && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valor calculado: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(spreadsheetMetrics.valorBrutoTotal)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Taxa */}
+                <div>
+                  <label className="block text-sm font-medium text-black mb-2">
+                    Taxa (%)
+                  </label>
+                  <input
+                    type="text"
+                    value={cardValues.taxa}
+                    onChange={(e) => setCardValues({ ...cardValues, taxa: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                    placeholder="0,00"
+                  />
+                  {spreadsheetMetrics && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valor calculado: {spreadsheetMetrics.taxaMedia.toFixed(2)}%
+                    </p>
+                  )}
+                </div>
+
+                {/* Valor Líquido */}
+                <div>
+                  <label className="block text-sm font-medium text-black mb-2">
+                    Valor Líquido (R$)
+                  </label>
+                  <input
+                    type="text"
+                    value={cardValues.valorLiquido}
+                    onChange={(e) => setCardValues({ ...cardValues, valorLiquido: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                    placeholder="0,00"
+                  />
+                  {spreadsheetMetrics && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valor calculado: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(spreadsheetMetrics.valorLiquidoTotal)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Botões de Ação */}
+            <div className="flex gap-3 p-4 md:p-6 border-t-2 border-gray-200">
+              <button
+                onClick={handleSaveCardValues}
+                className="flex-1 flex items-center justify-center gap-2 bg-black text-white py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+              >
+                <Save className="w-5 h-5" />
+                Salvar Valores
+              </button>
+              {spreadsheetData && getCustomerCardValues(
+                customerId, 
+                terminalId,
+                spreadsheetData.referenceMonth,
+                spreadsheetData.referenceDate,
+                spreadsheetData.type || 'monthly'
+              ) && (
+                <button
+                  onClick={handleDeleteCardValues}
+                  className="px-4 py-3 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-colors"
+                  title="Remover valores customizados e voltar a usar valores da planilha"
+                >
+                  Remover Customização
+                </button>
+              )}
+              <button
+                onClick={() => setShowEditCardValues(false)}
+                className="px-4 py-3 bg-gray-200 text-black rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </>
   );
+};
+
+// Função auxiliar para formatar data sem problemas de timezone (usada em múltiplos componentes)
+const formatDateLocal = (dateString: string): string => {
+  if (!dateString) return '';
+  // Se a data está no formato YYYY-MM-DD, extrair diretamente sem usar Date
+  // para evitar problemas de timezone
+  const parts = dateString.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    // Criar data local diretamente
+    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    return date.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  }
+  // Fallback para formato de data padrão
+  return new Date(dateString).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
 };
 
 export default CustomerSpreadsheet;

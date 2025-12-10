@@ -12,7 +12,7 @@ const migrateCustomer = (customer: Customer): Customer => {
     const terminal: CieloTerminal = {
       id: `term_${customer.id}_${Date.now()}`,
       terminalId: customer.cieloTerminalId,
-      name: `Maquininha ${customer.name}`,
+      name: `Conta ${customer.name}`,
       createdAt: new Date().toISOString(),
     };
     return {
@@ -36,7 +36,7 @@ export const getCustomerById = async (id: string): Promise<Customer | null> => {
   return customer ? migrateCustomer(customer) : null;
 };
 
-// Função para obter todas as maquininhas de todos os clientes
+// Função para obter todas as contas de todos os clientes
 export const getAllTerminals = async (): Promise<CieloTerminal[]> => {
   const customers = await getCustomers();
   const terminals: CieloTerminal[] = [];
@@ -104,7 +104,7 @@ export const createCustomer = async (
     cieloTerminals = [{
       id: `term_${Date.now()}`,
       terminalId: customer.cieloTerminalId,
-      name: `Maquininha ${customer.name}`,
+      name: `Conta ${customer.name}`,
       createdAt: new Date().toISOString(),
     }];
   }

@@ -21,13 +21,13 @@ export interface Sale {
   status: 'completed' | 'pending' | 'cancelled';
   paymentMethod: string;
   cieloTransactionId?: string;
-  cieloTerminalId?: string; // ID da maquininha que gerou a venda
+  cieloTerminalId?: string; // ID da conta que gerou a venda
 }
 
 export interface CieloTerminal {
-  id: string; // ID único da maquininha
-  terminalId: string; // ID da maquininha Cielo/Terminal
-  name?: string; // Nome descritivo da maquininha (opcional)
+  id: string; // ID único da conta
+  terminalId: string; // ID da conta Cielo/Terminal
+  name?: string; // Nome descritivo da conta (opcional)
   createdAt: string;
 }
 
@@ -36,13 +36,14 @@ export interface Customer {
   name: string;
   email: string;
   phone: string;
+  cpfCnpj?: string; // CNPJ ou CPF do cliente
   region: string;
   totalPurchases: number;
   lastPurchase: string;
   status: 'active' | 'inactive';
   category?: string;
   username?: string;
-  cieloTerminals?: CieloTerminal[]; // Array de maquininhas Cielo associadas ao cliente
+  cieloTerminals?: CieloTerminal[]; // Array de contas Cielo associadas ao cliente
   cieloTerminalId?: string; // Mantido para compatibilidade com versões antigas
 }
 
@@ -61,7 +62,7 @@ export interface FilterOptions {
   product?: string;
   region?: string;
   seller?: string;
-  terminalId?: string; // Filtrar por maquininha específica
+  terminalId?: string; // Filtrar por conta específica
 }
 
 export interface CieloTransaction {

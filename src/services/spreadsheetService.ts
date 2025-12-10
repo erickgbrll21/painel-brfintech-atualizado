@@ -21,10 +21,14 @@ export interface SpreadsheetMetrics {
 }
 
 export interface SpreadsheetData {
+  id?: string; // ID único da planilha (para histórico)
   customerId: string;
-  terminalId?: string; // ID da maquininha (opcional - se não fornecido, é planilha do cliente)
+  terminalId?: string; // ID da conta (opcional - se não fornecido, é planilha do cliente)
   fileName: string;
   uploadedAt: string;
+  referenceMonth: string; // Mês de referência no formato YYYY-MM (ex: "2024-01")
+  referenceDate?: string; // Data específica para planilhas diárias no formato YYYY-MM-DD (ex: "2024-01-15")
+  type?: 'monthly' | 'daily'; // Tipo de planilha: mensal (padrão) ou diária
   data: Array<Record<string, any>>; // Array de objetos representando as linhas da planilha (dados brutos)
   headers: string[]; // Cabeçalhos das colunas
   sales: SpreadsheetSale[]; // Dados estruturados de vendas
@@ -536,29 +540,66 @@ export const calculateSpreadsheetMetrics = (spreadsheet: SpreadsheetData): Sprea
 
 const STORAGE_KEY = 'customer_spreadsheets';
 
-// Obter todas as planilhas
+// Obter todas as planilhas (com migração de planilhas antigas)
 export const getAllSpreadsheets = (): SpreadsheetData[] => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    if (!stored) return [];
+    
+    const spreadsheets: SpreadsheetData[] = JSON.parse(stored);
+    
+    // Migrar planilhas antigas que não têm referenceMonth
+    let needsUpdate = false;
+    spreadsheets.forEach(s => {
+      if (!s.referenceMonth) {
+        s.referenceMonth = getReferenceMonth(s.uploadedAt);
+        needsUpdate = true;
+      }
+      if (!s.id) {
+        s.id = `spreadsheet_${s.customerId}_${s.terminalId || 'general'}_${s.referenceMonth}_${Date.now()}`;
+        needsUpdate = true;
+      }
+    });
+    
+    if (needsUpdate) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(spreadsheets));
+    }
+    
+    return spreadsheets;
   } catch (error) {
     console.error('Erro ao carregar planilhas:', error);
     return [];
   }
 };
 
-// Obter planilha de um cliente específico (sem terminalId específico)
-export const getSpreadsheetByCustomerId = (customerId: string): SpreadsheetData | null => {
+// Obter planilha de um cliente específico (sem terminalId específico) - retorna a mais recente
+export const getSpreadsheetByCustomerId = (customerId: string, referenceMonth?: string, type: 'monthly' | 'daily' = 'monthly'): SpreadsheetData | null => {
   const spreadsheets = getAllSpreadsheets();
-  const spreadsheet = spreadsheets.find(s => s.customerId === customerId && !s.terminalId);
   
-  if (!spreadsheet) return null;
+  // Filtrar planilhas do cliente pelo tipo
+  let filtered = spreadsheets.filter(s => 
+    s.customerId === customerId && 
+    !s.terminalId &&
+    (s.type || 'monthly') === type
+  );
+  
+  // Se especificou mês, filtrar por mês
+  if (referenceMonth) {
+    filtered = filtered.filter(s => s.referenceMonth === referenceMonth);
+  }
+  
+  if (filtered.length === 0) return null;
+  
+  // Retornar a mais recente (por data de upload)
+  const spreadsheet = filtered.sort((a, b) => 
+    new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+  )[0];
   
   // Reprocessar vendas se necessário (caso a taxa tenha mudado)
   if (spreadsheet.data && spreadsheet.data.length > 0 && (!spreadsheet.sales || spreadsheet.sales.length === 0)) {
     spreadsheet.sales = parseSpreadsheetToSales(spreadsheet.data, spreadsheet.headers, customerId);
     // Salvar novamente com vendas processadas
-    const existingIndex = spreadsheets.findIndex(s => s.customerId === customerId && !s.terminalId);
+    const existingIndex = spreadsheets.findIndex(s => s.id === spreadsheet.id);
     if (existingIndex >= 0) {
       spreadsheets[existingIndex] = spreadsheet;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(spreadsheets));
@@ -581,15 +622,28 @@ export const getSpreadsheetByCustomerId = (customerId: string): SpreadsheetData 
   return spreadsheet;
 };
 
-// Obter planilha de uma maquininha específica
-export const getSpreadsheetByTerminalId = (terminalId: string, customerId?: string): SpreadsheetData | null => {
+// Obter planilha de uma conta específica - retorna a mais recente
+export const getSpreadsheetByTerminalId = (terminalId: string, customerId?: string, referenceMonth?: string, type: 'monthly' | 'daily' = 'monthly'): SpreadsheetData | null => {
   const spreadsheets = getAllSpreadsheets();
-  const spreadsheet = spreadsheets.find(s => 
+  
+  // Filtrar planilhas do terminal pelo tipo
+  let filtered = spreadsheets.filter(s => 
     s.terminalId === terminalId && 
-    (!customerId || s.customerId === customerId)
+    (!customerId || s.customerId === customerId) &&
+    (s.type || 'monthly') === type
   );
   
-  if (!spreadsheet) return null;
+  // Se especificou mês, filtrar por mês
+  if (referenceMonth) {
+    filtered = filtered.filter(s => s.referenceMonth === referenceMonth);
+  }
+  
+  if (filtered.length === 0) return null;
+  
+  // Retornar a mais recente (por data de upload)
+  const spreadsheet = filtered.sort((a, b) => 
+    new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+  )[0];
   
   const customerIdToUse = spreadsheet.customerId;
   
@@ -597,7 +651,7 @@ export const getSpreadsheetByTerminalId = (terminalId: string, customerId?: stri
   if (spreadsheet.data && spreadsheet.data.length > 0 && (!spreadsheet.sales || spreadsheet.sales.length === 0)) {
     spreadsheet.sales = parseSpreadsheetToSales(spreadsheet.data, spreadsheet.headers, customerIdToUse);
     // Salvar novamente com vendas processadas
-    const existingIndex = spreadsheets.findIndex(s => s.terminalId === terminalId && s.customerId === customerIdToUse);
+    const existingIndex = spreadsheets.findIndex(s => s.id === spreadsheet.id);
     if (existingIndex >= 0) {
       spreadsheets[existingIndex] = spreadsheet;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(spreadsheets));
@@ -621,9 +675,144 @@ export const getSpreadsheetByTerminalId = (terminalId: string, customerId?: stri
 };
 
 // Obter todas as planilhas de um cliente (incluindo por terminal)
-export const getSpreadsheetsByCustomerId = (customerId: string): SpreadsheetData[] => {
+export const getSpreadsheetsByCustomerId = (customerId: string, terminalId?: string): SpreadsheetData[] => {
   const spreadsheets = getAllSpreadsheets();
+  if (terminalId) {
+    return spreadsheets.filter(s => s.customerId === customerId && s.terminalId === terminalId);
+  }
   return spreadsheets.filter(s => s.customerId === customerId);
+};
+
+// Obter planilha por ID único
+export const getSpreadsheetById = (id: string): SpreadsheetData | null => {
+  const spreadsheets = getAllSpreadsheets();
+  return spreadsheets.find(s => s.id === id) || null;
+};
+
+// Obter lista de meses disponíveis para um cliente/terminal
+export const getAvailableMonths = (customerId: string, terminalId?: string, type: 'monthly' | 'daily' = 'monthly'): string[] => {
+  const spreadsheets = getSpreadsheetsByCustomerId(customerId, terminalId).filter(s => (s.type || 'monthly') === type);
+  const months = new Set<string>();
+  
+  spreadsheets.forEach(s => {
+    if (s.referenceMonth) {
+      months.add(s.referenceMonth);
+    }
+  });
+  
+  // Ordenar do mais recente para o mais antigo
+  return Array.from(months).sort((a, b) => b.localeCompare(a));
+};
+
+// Obter lista de dias disponíveis com planilhas diárias para um cliente/terminal
+export const getAvailableDays = (customerId: string, terminalId?: string, referenceMonth?: string): string[] => {
+  const spreadsheets = getSpreadsheetsByCustomerId(customerId, terminalId).filter(s => 
+    (s.type || 'monthly') === 'daily' && s.referenceDate
+  );
+  
+  // Se especificou mês, filtrar por mês
+  let filtered = spreadsheets;
+  if (referenceMonth) {
+    filtered = filtered.filter(s => s.referenceMonth === referenceMonth);
+  }
+  
+  // Extrair datas únicas e ordenar (mais recente primeiro)
+  const days = new Set<string>();
+  filtered.forEach(s => {
+    if (s.referenceDate) {
+      days.add(s.referenceDate);
+    }
+  });
+  
+  return Array.from(days).sort((a, b) => b.localeCompare(a));
+};
+
+// Obter planilha diária por data específica
+export const getSpreadsheetByDate = (customerId: string, referenceDate: string, terminalId?: string): SpreadsheetData | null => {
+  if (!referenceDate) return null;
+  
+  const spreadsheets = getAllSpreadsheets();
+  
+  // Filtrar planilhas diárias do cliente pela data
+  let filtered = spreadsheets.filter(s => {
+    const matchesCustomer = s.customerId === customerId;
+    const matchesType = (s.type || 'monthly') === 'daily';
+    const matchesDate = s.referenceDate === referenceDate;
+    
+    return matchesCustomer && matchesType && matchesDate;
+  });
+  
+  // Se especificou terminal, tentar primeiro com terminal, depois sem terminal
+  if (terminalId) {
+    const withTerminal = filtered.filter(s => s.terminalId === terminalId);
+    
+    if (withTerminal.length > 0) {
+      filtered = withTerminal;
+    } else {
+      // Se não encontrou com terminal, tentar sem terminal (planilha geral do cliente)
+      const withoutTerminal = filtered.filter(s => !s.terminalId);
+      if (withoutTerminal.length > 0) {
+        filtered = withoutTerminal;
+      }
+    }
+  } else {
+    // Se não especificou terminal, pegar apenas planilhas gerais (sem terminal)
+    filtered = filtered.filter(s => !s.terminalId);
+  }
+  
+  if (filtered.length === 0) return null;
+  
+  // Retornar a mais recente (por data de upload)
+  const spreadsheet = filtered.sort((a, b) => 
+    new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+  )[0];
+  
+  // Reprocessar vendas se necessário
+  if (spreadsheet.data && spreadsheet.data.length > 0 && (!spreadsheet.sales || spreadsheet.sales.length === 0)) {
+    spreadsheet.sales = parseSpreadsheetToSales(spreadsheet.data, spreadsheet.headers, customerId);
+    const existingIndex = spreadsheets.findIndex(s => s.id === spreadsheet.id);
+    if (existingIndex >= 0) {
+      spreadsheets[existingIndex] = spreadsheet;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(spreadsheets));
+    }
+  } else if (spreadsheet.sales && spreadsheet.sales.length > 0) {
+    const customerTax = getCustomerTax(customerId);
+    if (customerTax !== null) {
+      spreadsheet.sales = spreadsheet.sales.map(sale => {
+        const valorLiquido = sale.valorBruto - (sale.valorBruto * (customerTax / 100));
+        return {
+          ...sale,
+          taxaTotal: customerTax,
+          valorLiquido,
+        };
+      });
+    }
+  }
+  
+  return spreadsheet;
+};
+
+// Obter histórico de planilhas organizado por mês
+export const getSpreadsheetHistory = (customerId: string, terminalId?: string, type: 'monthly' | 'daily' = 'monthly'): Record<string, SpreadsheetData[]> => {
+  const spreadsheets = getSpreadsheetsByCustomerId(customerId, terminalId).filter(s => (s.type || 'monthly') === type);
+  const history: Record<string, SpreadsheetData[]> = {};
+  
+  spreadsheets.forEach(s => {
+    const month = s.referenceMonth || getReferenceMonth(s.uploadedAt);
+    if (!history[month]) {
+      history[month] = [];
+    }
+    history[month].push(s);
+  });
+  
+  // Ordenar planilhas dentro de cada mês por data de upload (mais recente primeiro)
+  Object.keys(history).forEach(month => {
+    history[month].sort((a, b) => 
+      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    );
+  });
+  
+  return history;
 };
 
 // Calcular métricas agregadas de múltiplas planilhas
@@ -703,15 +892,29 @@ export const calculateAggregatedMetrics = (spreadsheets: SpreadsheetData[]): Spr
   return aggregated;
 };
 
+// Função auxiliar para extrair mês de referência (YYYY-MM) de uma data
+const getReferenceMonth = (date: string | Date): string => {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
 // Salvar planilha
-export const saveSpreadsheet = (spreadsheet: Omit<SpreadsheetData, 'sales'> & { sales?: SpreadsheetSale[] }): void => {
+// - Planilhas DIÁRIAS: sempre adiciona nova entrada (múltiplas por mês permitidas)
+// - Planilhas MENSAIS: substitui se já existir uma para o mesmo mês
+export const saveSpreadsheet = (spreadsheet: Omit<SpreadsheetData, 'sales' | 'id' | 'referenceMonth' | 'type' | 'referenceDate'> & { sales?: SpreadsheetSale[]; referenceMonth?: string; referenceDate?: string; type?: 'monthly' | 'daily' }): void => {
   try {
-    const spreadsheets = getAllSpreadsheets();
+    let spreadsheets = getAllSpreadsheets();
     
-    // Se tiver terminalId, buscar por terminalId + customerId, senão buscar apenas por customerId
-    const existingIndex = spreadsheet.terminalId
-      ? spreadsheets.findIndex(s => s.terminalId === spreadsheet.terminalId && s.customerId === spreadsheet.customerId)
-      : spreadsheets.findIndex(s => s.customerId === spreadsheet.customerId && !s.terminalId);
+    // Determinar mês de referência: usar o fornecido ou extrair da data de upload
+    const referenceMonth = spreadsheet.referenceMonth || getReferenceMonth(spreadsheet.uploadedAt);
+    
+    // Tipo de planilha: mensal (padrão) ou diária
+    const type = spreadsheet.type || 'monthly';
+    
+    // Data de referência para planilhas diárias
+    const referenceDate = spreadsheet.referenceDate;
     
     // Processar vendas se não foram processadas
     let sales: SpreadsheetSale[] = [];
@@ -721,14 +924,40 @@ export const saveSpreadsheet = (spreadsheet: Omit<SpreadsheetData, 'sales'> & { 
       sales = parseSpreadsheetToSales(spreadsheet.data, spreadsheet.headers, spreadsheet.customerId);
     }
     
+    // Gerar ID único para esta planilha
+    const dateKey = referenceDate || referenceMonth;
+    const id = `spreadsheet_${type}_${spreadsheet.customerId}_${spreadsheet.terminalId || 'general'}_${dateKey}_${Date.now()}`;
+    
     const spreadsheetToSave: SpreadsheetData = {
       ...spreadsheet,
+      id,
+      referenceMonth,
+      referenceDate,
+      type,
       sales,
     };
     
-    if (existingIndex >= 0) {
-      spreadsheets[existingIndex] = spreadsheetToSave;
+    // LÓGICA DE SALVAMENTO:
+    if (type === 'monthly') {
+      // Para planilhas MENSAIS: substituir se já existir uma para o mesmo mês
+      const existingIndex = spreadsheets.findIndex(s => 
+        s.customerId === spreadsheet.customerId &&
+        s.terminalId === spreadsheet.terminalId &&
+        s.referenceMonth === referenceMonth &&
+        (s.type || 'monthly') === 'monthly'
+      );
+      
+      if (existingIndex >= 0) {
+        // Substituir planilha mensal existente
+        spreadsheets[existingIndex] = spreadsheetToSave;
+      } else {
+        // Adicionar nova planilha mensal
+        spreadsheets.push(spreadsheetToSave);
+      }
     } else {
+      // Para planilhas DIÁRIAS: sempre adicionar (permitir múltiplas)
+      // IMPORTANTE: Mesmo que já exista uma planilha para o mesmo dia, adicionar nova entrada
+      // Isso permite múltiplas planilhas diárias para o mesmo dia, se necessário
       spreadsheets.push(spreadsheetToSave);
     }
     

@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { 
   DollarSign, 
   ShoppingCart, 
   CreditCard,
   ArrowLeft,
   FileSpreadsheet,
-  Percent
+  Percent,
+  Download
 } from 'lucide-react';
 import KPICard from '../components/KPICard';
 import FilterBar from '../components/FilterBar';
 import { useAuth } from '../context/AuthContext';
 import { getSales } from '../services/salesService';
 import { getCustomerByTerminalId, getAllTerminals, getCustomerById } from '../services/customerService';
-import { getSpreadsheetByCustomerId, getSpreadsheetByTerminalId, SpreadsheetData, calculateSpreadsheetMetrics } from '../services/spreadsheetService';
+import { getSpreadsheetByCustomerId, getSpreadsheetByTerminalId, SpreadsheetData, getAvailableDays, getSpreadsheetByDate, getAvailableMonths, calculateSpreadsheetMetrics } from '../services/spreadsheetService';
 import CustomerSpreadsheet from '../components/CustomerSpreadsheet';
 import { getCustomerTax } from '../services/customerTaxService';
 import { getCustomerCardValues } from '../services/customerCardValuesService';
@@ -33,19 +35,34 @@ const TerminalDashboard = () => {
   const [spreadsheetData, setSpreadsheetData] = useState<SpreadsheetData | null>(null);
   const [spreadsheetMetrics, setSpreadsheetMetrics] = useState<any>(null);
   const [showSpreadsheetModal, setShowSpreadsheetModal] = useState(false);
+  const [spreadsheetDataDaily, setSpreadsheetDataDaily] = useState<SpreadsheetData | null>(null);
+  const [activeTab, setActiveTab] = useState<'monthly' | 'daily'>('monthly');
+  const [selectedDay, setSelectedDay] = useState<string>('');
+  const [availableDays, setAvailableDays] = useState<string[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
 
-  // Carregar informações da maquininha
+  // Função para formatar mês (YYYY-MM) para exibição (MM/YYYY)
+  const formatMonth = (month: string): string => {
+    if (!month) return '';
+    const [year, monthNum] = month.split('-');
+    const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    return `${monthNames[parseInt(monthNum) - 1]}/${year}`;
+  };
+
+  // Carregar informações da conta
   // Atualizar automaticamente quando a planilha for reimportada
   useEffect(() => {
     const loadTerminalInfo = async () => {
       if (!terminalId) {
-        setError('ID da maquininha não fornecido');
+        setError('ID da conta não fornecido');
         setIsLoading(false);
         return;
       }
 
       try {
-        // Se for cliente, verificar se a maquininha pertence a ele e carregar todas as maquininhas
+        // Se for cliente, verificar se a conta pertence a ele e carregar todas as contas
         if (isCustomer() && user?.customerId) {
           const customer = await getCustomerById(user.customerId);
           if (customer) {
@@ -57,46 +74,124 @@ const TerminalDashboard = () => {
             (customer.cieloTerminalId ? [{
               id: `temp_${customer.cieloTerminalId}`,
               terminalId: customer.cieloTerminalId,
-              name: `Maquininha ${customer.name}`,
+              name: `Conta ${customer.name}`,
             }] : []);
             
             setCustomerTerminals(terminals);
             
-            // Carregar planilha da maquininha específica (prioridade) ou do cliente
-            let spreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId);
+            // Carregar meses disponíveis para planilhas mensais
+            const months = getAvailableMonths(user.customerId, terminalId, 'monthly');
+            setAvailableMonths(months);
+            
+            // Carregar planilha mensal da conta específica (prioridade) ou do cliente
+            let spreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId, undefined, 'monthly');
             if (!spreadsheet) {
-              spreadsheet = getSpreadsheetByCustomerId(user.customerId);
+              spreadsheet = getSpreadsheetByCustomerId(user.customerId, undefined, 'monthly');
             }
-            setSpreadsheetData(spreadsheet);
-            if (spreadsheet && spreadsheet.data && spreadsheet.data.length > 0) {
-              const metrics = calculateSpreadsheetMetrics(spreadsheet);
-              
-              // Verificar se há valores customizados dos cards definidos pelo admin
-              // Buscar valores específicos desta maquininha
-              const customValues = getCustomerCardValues(user.customerId, terminalId);
-              if (customValues) {
-                if (customValues.quantidadeVendas !== undefined) {
-                  metrics.totalVendas = customValues.quantidadeVendas;
-                }
-                if (customValues.valorBruto !== undefined) {
-                  metrics.valorBrutoTotal = customValues.valorBruto;
-                }
-                if (customValues.taxa !== undefined) {
-                  metrics.taxaMedia = customValues.taxa;
-                }
-                if (customValues.valorLiquido !== undefined) {
-                  metrics.valorLiquidoTotal = customValues.valorLiquido;
-                }
+            
+            // Se houver mês selecionado, manter; caso contrário, usar o mais recente
+            if (selectedMonth && months.includes(selectedMonth)) {
+              // Manter o mês selecionado e recarregar a planilha
+              const monthSpreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId, selectedMonth, 'monthly');
+              if (monthSpreadsheet) {
+                setSpreadsheetData(monthSpreadsheet);
+              } else {
+                setSpreadsheetData(spreadsheet);
               }
-              
-              setSpreadsheetMetrics(metrics);
+            } else if (months.length > 0 && !selectedMonth) {
+              // Se não há mês selecionado mas há meses disponíveis, usar o mais recente
+              setSelectedMonth(months[0]);
+              const monthSpreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId, months[0], 'monthly');
+              if (monthSpreadsheet) {
+                setSpreadsheetData(monthSpreadsheet);
+              } else {
+                setSpreadsheetData(spreadsheet);
+              }
+            } else if (spreadsheet) {
+              // Se não há meses disponíveis mas há planilha, usar a planilha atual
+            setSpreadsheetData(spreadsheet);
+              if (spreadsheet.referenceMonth) {
+                setSelectedMonth(spreadsheet.referenceMonth);
+              }
             } else {
+              // Limpar seleção se não há meses disponíveis
+              setSelectedMonth('');
+            }
+            
+            // Carregar planilha diária da conta específica (prioridade) ou do cliente
+            let spreadsheetDaily = getSpreadsheetByTerminalId(terminalId, user.customerId, undefined, 'daily');
+            if (!spreadsheetDaily) {
+              spreadsheetDaily = getSpreadsheetByCustomerId(user.customerId, undefined, 'daily');
+            }
+            setSpreadsheetDataDaily(spreadsheetDaily);
+            
+            // Carregar dias disponíveis para planilhas diárias
+            const days = getAvailableDays(user.customerId, terminalId);
+            setAvailableDays(days);
+            
+            // Se houver dia selecionado, manter; caso contrário, usar o mais recente
+            if (selectedDay && days.includes(selectedDay)) {
+              // Manter o dia selecionado e recarregar a planilha
+              const daySpreadsheet = getSpreadsheetByDate(user.customerId, selectedDay, terminalId);
+              if (daySpreadsheet) {
+                setSpreadsheetDataDaily(daySpreadsheet);
+              }
+            } else if (days.length > 0 && !selectedDay) {
+              // Se não há dia selecionado mas há dias disponíveis, usar o mais recente
+              setSelectedDay(days[0]);
+              const daySpreadsheet = getSpreadsheetByDate(user.customerId, days[0], terminalId);
+              if (daySpreadsheet) {
+                setSpreadsheetDataDaily(daySpreadsheet);
+              }
+            } else {
+              // Limpar seleção se não há dias disponíveis
+              setSelectedDay('');
+            }
+            
+            // Buscar valores customizados específicos da planilha selecionada
+            // Determinar qual planilha está ativa para buscar valores específicos
+            let activeSpreadsheet: SpreadsheetData | null = null;
+            if (activeTab === 'monthly' && spreadsheetData && spreadsheetData.data && spreadsheetData.data.length > 0) {
+              activeSpreadsheet = spreadsheetData;
+            } else if (activeTab === 'daily' && spreadsheetDataDaily && spreadsheetDataDaily.data && spreadsheetDataDaily.data.length > 0) {
+              activeSpreadsheet = spreadsheetDataDaily;
+            }
+            
+            if (activeSpreadsheet) {
+              const customValues = getCustomerCardValues(
+                user.customerId, 
+                terminalId,
+                activeSpreadsheet.referenceMonth,
+                activeSpreadsheet.referenceDate,
+                activeSpreadsheet.type || 'monthly'
+              );
+              
+              if (customValues) {
+                // Usar valores customizados
+                setSpreadsheetMetrics({
+                  totalVendas: customValues.quantidadeVendas || 0,
+                  valorBrutoTotal: customValues.valorBruto || 0,
+                  taxaMedia: customValues.taxa || 0,
+                  valorLiquidoTotal: customValues.valorLiquido || 0,
+                });
+              } else {
+                // Se não houver valores customizados, calcular da planilha
+                const metrics = calculateSpreadsheetMetrics(activeSpreadsheet);
+                setSpreadsheetMetrics({
+                  totalVendas: metrics.totalVendas || 0,
+                  valorBrutoTotal: metrics.valorBrutoTotal || 0,
+                  taxaMedia: metrics.taxaMedia || 0,
+                  valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+                });
+              }
+            } else {
+              // Se não houver planilha selecionada, não mostrar métricas
               setSpreadsheetMetrics(null);
             }
             
             const terminalIds = terminals.map(t => t.terminalId);
             if (!terminalIds.includes(terminalId)) {
-              setError('Você não tem permissão para acessar esta maquininha');
+              setError('Você não tem permissão para acessar esta conta');
               setIsLoading(false);
               return;
             }
@@ -109,7 +204,7 @@ const TerminalDashboard = () => {
         if (customer) {
           setCustomerName(customer.name);
           
-          // Buscar a maquininha específica
+          // Buscar a conta específica
           if (customer.cieloTerminals && customer.cieloTerminals.length > 0) {
             const foundTerminal = customer.cieloTerminals.find(t => t.terminalId === terminalId);
             if (foundTerminal) {
@@ -119,7 +214,7 @@ const TerminalDashboard = () => {
               setTerminal({
                 id: `temp_${terminalId}`,
                 terminalId,
-                name: `Maquininha ${customer.name}`,
+                name: `Conta ${customer.name}`,
                 createdAt: new Date().toISOString(),
               });
             }
@@ -128,24 +223,24 @@ const TerminalDashboard = () => {
             setTerminal({
               id: `temp_${terminalId}`,
               terminalId,
-              name: `Maquininha ${customer.name}`,
+              name: `Conta ${customer.name}`,
               createdAt: new Date().toISOString(),
             });
           }
         } else {
-          // Se não encontrou cliente, tentar buscar todas as maquininhas
+          // Se não encontrou cliente, tentar buscar todas as contas
           const terminals = await getAllTerminals();
           const foundTerminal = terminals.find(t => t.terminalId === terminalId);
           
           if (foundTerminal) {
             setTerminal(foundTerminal);
           } else {
-            setError('Maquininha não encontrada');
+            setError('Conta não encontrada');
           }
         }
       } catch (err) {
-        console.error('Erro ao carregar informações da maquininha:', err);
-        setError('Erro ao carregar informações da maquininha');
+        console.error('Erro ao carregar informações da conta:', err);
+        setError('Erro ao carregar informações da conta');
       } finally {
         setIsLoading(false);
       }
@@ -162,7 +257,7 @@ const TerminalDashboard = () => {
     const reloadSpreadsheetData = () => {
       if (!isMounted || !isCustomer() || !user?.customerId || !terminalId) return;
       
-      // Priorizar planilha da maquininha, senão buscar do cliente
+      // Priorizar planilha da conta, senão buscar do cliente
       let spreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId);
       if (!spreadsheet) {
         spreadsheet = getSpreadsheetByCustomerId(user.customerId);
@@ -177,38 +272,58 @@ const TerminalDashboard = () => {
         ? `${spreadsheet.uploadedAt}-${spreadsheet.data?.length || 0}-${customerTax || 'null'}` 
         : '';
       
-      // SEMPRE atualizar dados e recalcular métricas para garantir sincronização 100%
+      // Atualizar planilha mensal
       setSpreadsheetData(spreadsheet);
-      if (spreadsheet && spreadsheet.data && spreadsheet.data.length > 0) {
-        // SEMPRE recalcular métricas para garantir sincronização perfeita
-        // Recalcular sempre para garantir que valores estejam sempre atualizados
-        const metrics = calculateSpreadsheetMetrics(spreadsheet);
-        
-        // Verificar se há valores customizados dos cards definidos pelo admin
-        // Buscar valores específicos desta maquininha
-        const customValues = getCustomerCardValues(user.customerId, terminalId);
-        if (customValues) {
-          // Usar valores customizados se disponíveis, senão usar valores da planilha
-          if (customValues.quantidadeVendas !== undefined) {
-            metrics.totalVendas = customValues.quantidadeVendas;
-          }
-          if (customValues.valorBruto !== undefined) {
-            metrics.valorBrutoTotal = customValues.valorBruto;
-          }
-          if (customValues.taxa !== undefined) {
-            metrics.taxaMedia = customValues.taxa;
-          }
-          if (customValues.valorLiquido !== undefined) {
-            metrics.valorLiquidoTotal = customValues.valorLiquido;
-          }
-        }
-        
-        setSpreadsheetMetrics(metrics);
-        hashRef.current = currentHash;
-      } else {
-        setSpreadsheetMetrics(null);
-        hashRef.current = '';
+      
+      // Carregar planilha diária também
+      let spreadsheetDaily = getSpreadsheetByTerminalId(terminalId, user.customerId, undefined, 'daily');
+      if (!spreadsheetDaily) {
+        spreadsheetDaily = getSpreadsheetByCustomerId(user.customerId, undefined, 'daily');
       }
+      setSpreadsheetDataDaily(spreadsheetDaily);
+      
+      // Buscar valores customizados específicos da planilha selecionada
+      // Determinar qual planilha está ativa para buscar valores específicos
+      let activeSpreadsheet: SpreadsheetData | null = null;
+      if (activeTab === 'monthly' && spreadsheet && spreadsheet.data && spreadsheet.data.length > 0) {
+        activeSpreadsheet = spreadsheet;
+      } else if (activeTab === 'daily' && spreadsheetDaily && spreadsheetDaily.data && spreadsheetDaily.data.length > 0) {
+        activeSpreadsheet = spreadsheetDaily;
+      }
+      
+      if (activeSpreadsheet) {
+        const customValues = getCustomerCardValues(
+          user.customerId, 
+          terminalId,
+          activeSpreadsheet.referenceMonth,
+          activeSpreadsheet.referenceDate,
+          activeSpreadsheet.type || 'monthly'
+        );
+        
+        if (customValues) {
+          // Usar valores customizados
+          setSpreadsheetMetrics({
+            totalVendas: customValues.quantidadeVendas || 0,
+            valorBrutoTotal: customValues.valorBruto || 0,
+            taxaMedia: customValues.taxa || 0,
+            valorLiquidoTotal: customValues.valorLiquido || 0,
+          });
+        } else {
+          // Se não houver valores customizados, calcular da planilha
+          const metrics = calculateSpreadsheetMetrics(activeSpreadsheet);
+          setSpreadsheetMetrics({
+            totalVendas: metrics.totalVendas || 0,
+            valorBrutoTotal: metrics.valorBrutoTotal || 0,
+            taxaMedia: metrics.taxaMedia || 0,
+            valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+          });
+        }
+      } else {
+        // Se não houver planilha selecionada, não mostrar métricas
+        setSpreadsheetMetrics(null);
+      }
+      
+        hashRef.current = currentHash;
     };
     
     // Carregar planilha inicialmente
@@ -355,11 +470,11 @@ const TerminalDashboard = () => {
           </div>
         </div>
         
-        {/* Seletor de maquininha para clientes com múltiplas */}
+        {/* Seletor de conta para clientes com múltiplas */}
         {isCustomer() && customerTerminals.length > 1 && terminalId && (
           <div className="w-full md:w-auto">
             <label className="block text-sm font-medium text-black mb-2">
-              Trocar Maquininha
+              Trocar Conta
             </label>
             <select
               value={terminalId}
@@ -435,54 +550,212 @@ const TerminalDashboard = () => {
         </div>
       )}
 
-      {/* Seção de Planilha - Apenas para Clientes */}
-      {isCustomer() && spreadsheetData && spreadsheetData.data && spreadsheetData.data.length > 0 && (
+      {/* Seção de Planilhas - Apenas para Clientes */}
+      {isCustomer() && (spreadsheetData || spreadsheetDataDaily) && (
         <div className="bg-white border-2 border-black rounded-lg overflow-hidden">
-          <div className="p-4 md:p-6 border-b-2 border-black">
-            <div className="flex items-center justify-between">
+          {/* Tabs para Mensal e Diária */}
+          <div className="border-b-2 border-black">
+            <div className="flex">
+              <button
+                onClick={() => setActiveTab('monthly')}
+                className={`flex-1 py-3 px-4 font-semibold transition-colors ${
+                  activeTab === 'monthly'
+                    ? 'bg-black text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                📊 Planilha Mensal
+              </button>
+              <button
+                onClick={() => setActiveTab('daily')}
+                className={`flex-1 py-3 px-4 font-semibold transition-colors ${
+                  activeTab === 'daily'
+                    ? 'bg-black text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                📅 Planilha Diária
+              </button>
+            </div>
+          </div>
+
+          {/* Conteúdo da Aba Mensal */}
+          {activeTab === 'monthly' && spreadsheetData && spreadsheetData.data && spreadsheetData.data.length > 0 && (
+            <>
+              <div className="p-4 md:p-6 border-b-2 border-gray-200">
+                <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-3">
                 <FileSpreadsheet className="w-5 h-5 md:w-6 md:h-6 text-black" />
                 <div>
-                  <h2 className="text-lg md:text-xl font-bold text-black">Dados da Planilha</h2>
+                      <h3 className="text-base md:text-lg font-bold text-black">Planilha Mensal</h3>
                   <p className="text-xs md:text-sm text-gray-600">
                     {spreadsheetData.fileName} • {new Date(spreadsheetData.uploadedAt).toLocaleDateString('pt-BR')}
+                        {spreadsheetData.referenceMonth && <span className="ml-2 font-semibold text-blue-700">({spreadsheetData.referenceMonth.split('-').reverse().join('/')})</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {spreadsheetData.data.length} linhas • {spreadsheetData.headers.length} colunas
                   </p>
                 </div>
               </div>
-              <span className="text-xs md:text-sm text-gray-500">
-                {spreadsheetData.data.length} {spreadsheetData.data.length === 1 ? 'linha' : 'linhas'} • {spreadsheetData.headers.length} {spreadsheetData.headers.length === 1 ? 'coluna' : 'colunas'}
-              </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => {
+                        const wb = XLSX.utils.book_new();
+                        const wsData = [spreadsheetData.headers, ...spreadsheetData.data.map((row: any) => spreadsheetData.headers.map(header => row[header] || ''))];
+                        const ws = XLSX.utils.aoa_to_sheet(wsData);
+                        XLSX.utils.book_append_sheet(wb, ws, 'Planilha');
+                        XLSX.writeFile(wb, spreadsheetData.fileName || `planilha_mensal_${spreadsheetData.referenceMonth || 'atual'}.xlsx`);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-semibold text-sm"
+                    >
+                      <Download className="w-4 h-4" />
+                      Baixar
+                    </button>
+                    {/* Campo de filtro por mês */}
+                    {availableMonths.length > 0 && (
+                      <select
+                        value={selectedMonth}
+                        onChange={(e) => {
+                          const monthValue = e.target.value;
+                          setSelectedMonth(monthValue);
+                          if (monthValue && user?.customerId && terminalId) {
+                            const monthSpreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId, monthValue, 'monthly');
+                            setSpreadsheetData(monthSpreadsheet);
+                          } else {
+                            setSpreadsheetData(null);
+                          }
+                        }}
+                        className="px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors bg-white font-semibold text-sm"
+                        title="Selecione o mês para visualizar a planilha mensal"
+                      >
+                        <option value="">Selecione o mês</option>
+                        {availableMonths.map(month => (
+                          <option key={month} value={month}>
+                            📊 {formatMonth(month)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
             </div>
           </div>
-          <div className="overflow-x-auto p-4 md:p-6">
+              <div className="p-4 md:p-6">
             <div className="overflow-x-auto border-2 border-gray-200 rounded-lg">
               <table className="w-full min-w-full">
                 <thead>
                   <tr className="bg-black text-white">
                     {spreadsheetData.headers.map((header, index) => (
-                      <th
-                        key={index}
-                        className="text-left py-3 px-4 font-semibold text-sm whitespace-nowrap"
-                      >
-                        {header}
-                      </th>
+                          <th key={index} className="text-left py-3 px-4 font-semibold text-sm whitespace-nowrap">{header}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {spreadsheetData.data.map((row, rowIndex) => (
-                    <tr
-                      key={rowIndex}
-                      className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50 hover:bg-gray-100'}
+                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50 hover:bg-gray-100'}>
+                          {spreadsheetData.headers.map((header, colIndex) => (
+                            <td key={colIndex} className="py-3 px-4 text-sm text-gray-700 border-b border-gray-200">
+                              {row[header] !== null && row[header] !== undefined ? String(row[header]) : '-'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Conteúdo da Aba Diária */}
+          {activeTab === 'daily' && spreadsheetDataDaily && spreadsheetDataDaily.data && spreadsheetDataDaily.data.length > 0 && (
+            <>
+              <div className="p-4 md:p-6 border-b-2 border-gray-200">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3">
+                    <FileSpreadsheet className="w-5 h-5 md:w-6 md:h-6 text-black" />
+                    <div>
+                      <h3 className="text-base md:text-lg font-bold text-black">Planilha Diária</h3>
+                      <p className="text-xs md:text-sm text-gray-600">
+                        {spreadsheetDataDaily.fileName} • {new Date(spreadsheetDataDaily.uploadedAt).toLocaleDateString('pt-BR')}
+                        {spreadsheetDataDaily.referenceDate && <span className="ml-2 font-semibold text-green-700">(📅 {new Date(spreadsheetDataDaily.referenceDate).toLocaleDateString('pt-BR')})</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {spreadsheetDataDaily.data.length} linhas • {spreadsheetDataDaily.headers.length} colunas
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => {
+                        const wb = XLSX.utils.book_new();
+                        const wsData = [spreadsheetDataDaily.headers, ...spreadsheetDataDaily.data.map((row: any) => spreadsheetDataDaily.headers.map(header => row[header] || ''))];
+                        const ws = XLSX.utils.aoa_to_sheet(wsData);
+                        XLSX.utils.book_append_sheet(wb, ws, 'Planilha');
+                        XLSX.writeFile(wb, spreadsheetDataDaily.fileName || `planilha_diaria_${spreadsheetDataDaily.referenceMonth || 'atual'}.xlsx`);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-semibold text-sm"
                     >
-                      {spreadsheetData.headers.map((header, colIndex) => (
-                        <td
-                          key={colIndex}
-                          className="py-3 px-4 text-sm text-gray-700 border-b border-gray-200"
-                        >
-                          {row[header] !== null && row[header] !== undefined
-                            ? String(row[header])
-                            : '-'}
+                      <Download className="w-4 h-4" />
+                      Baixar
+                    </button>
+                    {/* Campo de filtro por dia */}
+                    {availableDays.length > 0 && (
+                      <select
+                        value={selectedDay}
+                        onChange={(e) => {
+                          const dayValue = e.target.value;
+                          setSelectedDay(dayValue);
+                          if (dayValue && user?.customerId && terminalId) {
+                            const daySpreadsheet = getSpreadsheetByDate(user.customerId, dayValue, terminalId);
+                            setSpreadsheetDataDaily(daySpreadsheet);
+                          } else {
+                            setSpreadsheetDataDaily(null);
+                          }
+                        }}
+                        className="px-4 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500 transition-colors bg-white font-semibold text-sm"
+                        title="Selecione o dia para visualizar a planilha diária"
+                      >
+                        <option value="">Selecione o dia</option>
+                        {availableDays.map(day => {
+                          const parts = day.split('-');
+                          let formattedDate = day;
+                          if (parts.length === 3) {
+                            const [year, month, dayNum] = parts;
+                            const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(dayNum));
+                            formattedDate = date.toLocaleDateString('pt-BR', {
+                              weekday: 'short',
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            });
+                          }
+                          return (
+                            <option key={day} value={day}>
+                              📅 {formattedDate}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 md:p-6">
+                <div className="overflow-x-auto border-2 border-gray-200 rounded-lg">
+                  <table className="w-full min-w-full">
+                    <thead>
+                      <tr className="bg-black text-white">
+                        {spreadsheetDataDaily.headers.map((header, index) => (
+                          <th key={index} className="text-left py-3 px-4 font-semibold text-sm whitespace-nowrap">{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {spreadsheetDataDaily.data.map((row, rowIndex) => (
+                        <tr key={rowIndex} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50 hover:bg-gray-100'}>
+                          {spreadsheetDataDaily.headers.map((header, colIndex) => (
+                            <td key={colIndex} className="py-3 px-4 text-sm text-gray-700 border-b border-gray-200">
+                              {row[header] !== null && row[header] !== undefined ? String(row[header]) : '-'}
                         </td>
                       ))}
                     </tr>
@@ -491,10 +764,30 @@ const TerminalDashboard = () => {
               </table>
             </div>
           </div>
+            </>
+          )}
+
+          {/* Mensagem quando não há planilha na aba selecionada */}
+          {activeTab === 'monthly' && (!spreadsheetData || !spreadsheetData.data || spreadsheetData.data.length === 0) && (
+            <div className="p-8 text-center">
+              <FileSpreadsheet className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-600 font-medium">Nenhuma planilha mensal disponível</p>
+              <p className="text-gray-500 text-sm mt-2">Aguardando administrador enviar planilha mensal</p>
+            </div>
+          )}
+
+          {activeTab === 'daily' && (!spreadsheetDataDaily || !spreadsheetDataDaily.data || spreadsheetDataDaily.data.length === 0) && (
+            <div className="p-8 text-center">
+              <FileSpreadsheet className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-600 font-medium">Nenhuma planilha diária disponível</p>
+              <p className="text-gray-500 text-sm mt-2">Aguardando administrador enviar planilha diária</p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Vendas Recentes */}
+      {/* Vendas Recentes - Apenas para Administradores */}
+      {isAdmin() && (
       <div className="bg-white border-2 border-black rounded-lg overflow-hidden">
         <div className="p-4 md:p-6 border-b-2 border-black">
           <h2 className="text-lg md:text-xl font-bold text-black">Vendas Recentes</h2>
@@ -514,7 +807,7 @@ const TerminalDashboard = () => {
               {recentSales.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-gray-500">
-                    Nenhuma venda encontrada para esta maquininha
+                    Nenhuma venda encontrada para esta conta
                   </td>
                 </tr>
               ) : (
@@ -552,9 +845,10 @@ const TerminalDashboard = () => {
           </table>
         </div>
       </div>
+      )}
 
-      {/* Modal de Planilha - Apenas para Administradores */}
-      {showSpreadsheetModal && isAdmin() && user?.customerId && (
+      {/* Modal de Planilha - Para Clientes e Administradores */}
+      {showSpreadsheetModal && user?.customerId && (
         <CustomerSpreadsheet
           customerId={user.customerId}
           customerName={customerName || user.name || 'Cliente'}
@@ -569,18 +863,37 @@ const TerminalDashboard = () => {
                 spreadsheet = getSpreadsheetByCustomerId(user.customerId);
               }
               setSpreadsheetData(spreadsheet);
+              
+              // Buscar valores customizados específicos da planilha selecionada
               if (spreadsheet && spreadsheet.data && spreadsheet.data.length > 0) {
-                const metrics = calculateSpreadsheetMetrics(spreadsheet);
-                // Buscar valores customizados específicos desta maquininha
-                const customValues = getCustomerCardValues(user.customerId, terminalId);
+                const customValues = getCustomerCardValues(
+                  user.customerId, 
+                  terminalId,
+                  spreadsheet.referenceMonth,
+                  spreadsheet.referenceDate,
+                  spreadsheet.type || 'monthly'
+                );
+                
                 if (customValues) {
-                  if (customValues.quantidadeVendas !== undefined) metrics.totalVendas = customValues.quantidadeVendas;
-                  if (customValues.valorBruto !== undefined) metrics.valorBrutoTotal = customValues.valorBruto;
-                  if (customValues.taxa !== undefined) metrics.taxaMedia = customValues.taxa;
-                  if (customValues.valorLiquido !== undefined) metrics.valorLiquidoTotal = customValues.valorLiquido;
+                  // Usar valores customizados
+                  setSpreadsheetMetrics({
+                    totalVendas: customValues.quantidadeVendas || 0,
+                    valorBrutoTotal: customValues.valorBruto || 0,
+                    taxaMedia: customValues.taxa || 0,
+                    valorLiquidoTotal: customValues.valorLiquido || 0,
+                  });
+                } else {
+                  // Se não houver valores customizados, calcular da planilha
+                  const metrics = calculateSpreadsheetMetrics(spreadsheet);
+                  setSpreadsheetMetrics({
+                    totalVendas: metrics.totalVendas || 0,
+                    valorBrutoTotal: metrics.valorBrutoTotal || 0,
+                    taxaMedia: metrics.taxaMedia || 0,
+                    valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+                  });
                 }
-                setSpreadsheetMetrics(metrics);
               } else {
+                // Se não houver planilha, não mostrar métricas
                 setSpreadsheetMetrics(null);
               }
             }

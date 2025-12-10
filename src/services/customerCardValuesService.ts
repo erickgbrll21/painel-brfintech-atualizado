@@ -4,7 +4,10 @@ const STORAGE_KEY = 'customer_card_values';
 
 export interface CustomerCardValues {
   customerId: string;
-  terminalId?: string; // ID da maquininha (opcional - se não fornecido, é valor geral do cliente)
+  terminalId?: string; // ID da conta (opcional - se não fornecido, é valor geral do cliente)
+  referenceMonth?: string; // Mês de referência para planilhas mensais (YYYY-MM)
+  referenceDate?: string; // Data de referência para planilhas diárias (YYYY-MM-DD)
+  type?: 'monthly' | 'daily'; // Tipo de planilha
   quantidadeVendas?: number;
   valorBruto?: number;
   taxa?: number;
@@ -13,17 +16,36 @@ export interface CustomerCardValues {
   updatedBy?: string; // ID do admin que atualizou
 }
 
-// Gerar chave única para armazenamento (customerId + terminalId)
-const getStorageKey = (customerId: string, terminalId?: string): string => {
-  return terminalId ? `${customerId}_${terminalId}` : customerId;
+// Gerar chave única para armazenamento por planilha específica
+const getStorageKey = (
+  customerId: string, 
+  terminalId?: string, 
+  referenceMonth?: string, 
+  referenceDate?: string,
+  type?: 'monthly' | 'daily'
+): string => {
+  const parts = [customerId];
+  if (terminalId) parts.push(`term_${terminalId}`);
+  if (type === 'monthly' && referenceMonth) {
+    parts.push(`month_${referenceMonth}`);
+  } else if (type === 'daily' && referenceDate) {
+    parts.push(`date_${referenceDate}`);
+  }
+  return parts.join('_');
 };
 
-// Obter valores customizados de um cliente ou maquininha específica
-export const getCustomerCardValues = (customerId: string, terminalId?: string): CustomerCardValues | null => {
+// Obter valores customizados de uma planilha específica
+export const getCustomerCardValues = (
+  customerId: string, 
+  terminalId?: string,
+  referenceMonth?: string,
+  referenceDate?: string,
+  type?: 'monthly' | 'daily'
+): CustomerCardValues | null => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     const allValues = stored ? JSON.parse(stored) : {};
-    const key = getStorageKey(customerId, terminalId);
+    const key = getStorageKey(customerId, terminalId, referenceMonth, referenceDate, type);
     const value = allValues[key];
     
     if (value) {
@@ -31,6 +53,9 @@ export const getCustomerCardValues = (customerId: string, terminalId?: string): 
         ...value,
         customerId,
         terminalId: terminalId || undefined,
+        referenceMonth: referenceMonth || undefined,
+        referenceDate: referenceDate || undefined,
+        type: type || undefined,
       };
     }
     
@@ -41,7 +66,7 @@ export const getCustomerCardValues = (customerId: string, terminalId?: string): 
   }
 };
 
-// Salvar valores customizados dos cards
+// Salvar valores customizados dos cards para uma planilha específica
 export const saveCustomerCardValues = (
   customerId: string,
   values: {
@@ -51,16 +76,22 @@ export const saveCustomerCardValues = (
     valorLiquido?: number;
   },
   updatedBy?: string,
-  terminalId?: string
+  terminalId?: string,
+  referenceMonth?: string,
+  referenceDate?: string,
+  type?: 'monthly' | 'daily'
 ): void => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     const allValues = stored ? JSON.parse(stored) : {};
-    const key = getStorageKey(customerId, terminalId);
+    const key = getStorageKey(customerId, terminalId, referenceMonth, referenceDate, type);
     
     allValues[key] = {
       customerId,
       terminalId: terminalId || undefined,
+      referenceMonth: referenceMonth || undefined,
+      referenceDate: referenceDate || undefined,
+      type: type || undefined,
       ...values,
       updatedAt: new Date().toISOString(),
       updatedBy,
@@ -71,7 +102,7 @@ export const saveCustomerCardValues = (
     // Disparar evento para atualizar dashboards
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent('cardValuesUpdated', { 
-        detail: { customerId, terminalId } 
+        detail: { customerId, terminalId, referenceMonth, referenceDate, type } 
       }));
     }, 50);
   } catch (error) {
@@ -80,19 +111,25 @@ export const saveCustomerCardValues = (
   }
 };
 
-// Deletar valores customizados (voltar a usar valores da planilha)
-export const deleteCustomerCardValues = (customerId: string, terminalId?: string): void => {
+// Deletar valores customizados de uma planilha específica (voltar a usar valores da planilha)
+export const deleteCustomerCardValues = (
+  customerId: string, 
+  terminalId?: string,
+  referenceMonth?: string,
+  referenceDate?: string,
+  type?: 'monthly' | 'daily'
+): void => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     const allValues = stored ? JSON.parse(stored) : {};
-    const key = getStorageKey(customerId, terminalId);
+    const key = getStorageKey(customerId, terminalId, referenceMonth, referenceDate, type);
     delete allValues[key];
     localStorage.setItem(STORAGE_KEY, JSON.stringify(allValues));
     
     // Disparar evento para atualizar dashboards
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent('cardValuesUpdated', { 
-        detail: { customerId, terminalId } 
+        detail: { customerId, terminalId, referenceMonth, referenceDate, type } 
       }));
     }, 50);
   } catch (error) {

@@ -8,6 +8,7 @@ import CustomerSales from './pages/CustomerSales';
 import CieloTransactions from './pages/CieloTransactions';
 import TerminalDashboard from './pages/TerminalDashboard';
 import Layout from './components/Layout';
+import './utils/resetDatabase'; // Importar para disponibilizar resetDatabase() no console
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();

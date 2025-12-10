@@ -54,7 +54,7 @@ const convertCieloTransactionToSale = (
  */
 export const syncCieloTransactionsToSales = async (terminalId?: string): Promise<Sale[]> => {
   try {
-    // Buscar todos os clientes com maquininha Cielo configurada
+    // Buscar todos os clientes com conta Cielo configurada
     const customers = await getCustomers();
     
     // Filtrar clientes com terminais (novo formato) ou cieloTerminalId (compatibilidade)
@@ -72,7 +72,7 @@ export const syncCieloTransactionsToSales = async (terminalId?: string): Promise
     // Criar mapa de terminal ID para cliente
     const terminalToCustomer = new Map<string, typeof customersWithTerminal[0]>();
     customersWithTerminal.forEach(customer => {
-      // Suporte para múltiplas maquininhas
+      // Suporte para múltiplas contas
       if (customer.cieloTerminals && customer.cieloTerminals.length > 0) {
         customer.cieloTerminals.forEach(term => {
           terminalToCustomer.set(term.terminalId, customer);
