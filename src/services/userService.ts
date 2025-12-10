@@ -1,13 +1,14 @@
 import { User } from '../types';
+import { hashPassword, verifyPassword, encryptObject, decryptObject } from '../utils/encryption';
 
-// Armazenamento de senhas (em produção, isso seria criptografado)
-const USER_PASSWORDS: { [userId: string]: string } = {
-  '1': '123456', // admin@brfintech.com
-  '2': '123456', // user@brfintech.com
-};
+const STORAGE_KEY = 'brfintech_users';
+const PASSWORDS_STORAGE_KEY = 'brfintech_user_passwords_encrypted';
+
+// Armazenamento de senhas com hash (protegido)
+let USER_PASSWORDS: { [userId: string]: string } = {};
 
 // Dados de usuários - apenas usuários administrativos básicos
-const MOCK_USERS: User[] = [
+const DEFAULT_USERS: User[] = [
   {
     id: '1',
     name: 'Administrador',
@@ -24,10 +25,95 @@ const MOCK_USERS: User[] = [
   },
 ];
 
-const ALL_USERS = [...MOCK_USERS];
+// Carregar usuários do localStorage ou usar padrão
+const loadUsersFromStorage = (): User[] => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const users = JSON.parse(stored);
+      // Garantir que usuários padrão existam
+      const defaultUserIds = DEFAULT_USERS.map(u => u.id);
+      const existingUsers = users.filter((u: User) => !defaultUserIds.includes(u.id));
+      return [...DEFAULT_USERS, ...existingUsers];
+    }
+  } catch (error) {
+    console.error('Erro ao carregar usuários do localStorage:', error);
+  }
+  return [...DEFAULT_USERS];
+};
+
+// Salvar usuários no localStorage
+const saveUsersToStorage = (users: User[]): void => {
+  try {
+    // Não salvar usuários padrão, apenas os criados pelo usuário
+    const defaultUserIds = DEFAULT_USERS.map(u => u.id);
+    const customUsers = users.filter(u => !defaultUserIds.includes(u.id));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(customUsers));
+  } catch (error) {
+    console.error('Erro ao salvar usuários no localStorage:', error);
+  }
+};
+
+// Carregar senhas do localStorage (criptografadas)
+const loadPasswordsFromStorage = async (): Promise<void> => {
+  try {
+    const stored = localStorage.getItem(PASSWORDS_STORAGE_KEY);
+    if (stored) {
+      USER_PASSWORDS = await decryptObject<{ [userId: string]: string }>(stored);
+      // Garantir que senhas padrão existam
+      if (!USER_PASSWORDS['1']) {
+        USER_PASSWORDS['1'] = await hashPassword('123456');
+      }
+      if (!USER_PASSWORDS['2']) {
+        USER_PASSWORDS['2'] = await hashPassword('123456');
+      }
+      await savePasswordsToStorage();
+    } else {
+      // Inicializar senhas padrão com hash
+      USER_PASSWORDS['1'] = await hashPassword('123456'); // admin@brfintech.com
+      USER_PASSWORDS['2'] = await hashPassword('123456'); // user@brfintech.com
+      await savePasswordsToStorage();
+    }
+  } catch (error) {
+    console.error('Erro ao carregar senhas do localStorage:', error);
+    // Inicializar senhas padrão em caso de erro
+    try {
+      USER_PASSWORDS['1'] = await hashPassword('123456');
+      USER_PASSWORDS['2'] = await hashPassword('123456');
+    } catch (hashError) {
+      console.error('Erro ao criar hash de senha padrão:', hashError);
+    }
+  }
+};
+
+// Salvar senhas no localStorage (criptografadas)
+const savePasswordsToStorage = async (): Promise<void> => {
+  try {
+    const encrypted = await encryptObject(USER_PASSWORDS);
+    localStorage.setItem(PASSWORDS_STORAGE_KEY, encrypted);
+  } catch (error) {
+    console.error('Erro ao salvar senhas no localStorage:', error);
+  }
+};
+
+// Inicializar dados
+let ALL_USERS = loadUsersFromStorage();
+// Inicializar senhas (não bloqueia, será carregado quando necessário)
+let passwordsInitialized = false;
+loadPasswordsFromStorage().then(() => {
+  passwordsInitialized = true;
+}).catch(() => {
+  passwordsInitialized = true;
+});
 
 export const getUsers = async (): Promise<User[]> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  // Recarregar do storage para garantir dados atualizados
+  ALL_USERS = loadUsersFromStorage();
   return [...ALL_USERS];
 };
 
@@ -41,17 +127,28 @@ export const createUser = async (
   password?: string
 ): Promise<User> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  
+  // Recarregar usuários atualizados
+  ALL_USERS = loadUsersFromStorage();
+  
+  // Gerar ID único baseado no timestamp
+  const newId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const newUser: User = {
     ...user,
-    id: String(ALL_USERS.length + 1),
+    id: newId,
     createdAt: new Date().toISOString(),
   };
+  
   ALL_USERS.push(newUser);
   
-  // Armazenar senha se fornecida
+  // Armazenar senha com hash se fornecida
   if (password) {
-    USER_PASSWORDS[newUser.id] = password;
+    USER_PASSWORDS[newUser.id] = await hashPassword(password);
+    await savePasswordsToStorage();
   }
+  
+  // Salvar no localStorage
+  saveUsersToStorage(ALL_USERS);
   
   return newUser;
 };
@@ -62,27 +159,35 @@ export const updateUser = async (
   password?: string
 ): Promise<User | null> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  
+  // Recarregar usuários atualizados
+  ALL_USERS = loadUsersFromStorage();
+  
   const user = ALL_USERS.find(u => u.id === id);
   if (user) {
     Object.assign(user, updates);
     
-    // Atualizar senha se fornecida
+    // Atualizar senha com hash se fornecida
     if (password) {
-      USER_PASSWORDS[id] = password;
+      USER_PASSWORDS[id] = await hashPassword(password);
+      await savePasswordsToStorage();
     }
+    
+    // Salvar no localStorage
+    saveUsersToStorage(ALL_USERS);
     
     return { ...user };
   }
   return null;
 };
 
-// Função para verificar senha do usuário
-export const getUserPassword = (userId: string): string | undefined => {
+// Função para verificar senha do usuário (retorna hash)
+export const getUserPasswordHash = (userId: string): string | undefined => {
   return USER_PASSWORDS[userId];
 };
 
-// Função para verificar senha por email
-export const getUserPasswordByEmail = (email: string): string | undefined => {
+// Função para verificar senha por email (retorna hash)
+export const getUserPasswordHashByEmail = (email: string): string | undefined => {
   const user = ALL_USERS.find(u => u.email === email);
   if (user) {
     return USER_PASSWORDS[user.id];
@@ -90,13 +195,63 @@ export const getUserPasswordByEmail = (email: string): string | undefined => {
   return undefined;
 };
 
+// Função para verificar se a senha está correta
+export const verifyUserPassword = async (
+  userId: string,
+  password: string
+): Promise<boolean> => {
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  const hashedPassword = USER_PASSWORDS[userId];
+  if (!hashedPassword) return false;
+  return verifyPassword(password, hashedPassword);
+};
+
+// Função para verificar senha por email
+export const verifyUserPasswordByEmail = async (
+  email: string,
+  password: string
+): Promise<boolean> => {
+  const user = ALL_USERS.find(u => u.email === email);
+  if (!user) return false;
+  return verifyUserPassword(user.id, password);
+};
+
+// Mantido para compatibilidade (deprecated - usar verifyUserPassword)
+export const getUserPassword = (_userId: string): string | undefined => {
+  console.warn('getUserPassword está deprecated. Use verifyUserPassword.');
+  return undefined;
+};
+
+export const getUserPasswordByEmail = (_email: string): string | undefined => {
+  console.warn('getUserPasswordByEmail está deprecated. Use verifyUserPasswordByEmail.');
+  return undefined;
+};
+
 export const deleteUser = async (id: string): Promise<boolean> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  
+  // Não permitir deletar usuários padrão
+  const defaultUserIds = DEFAULT_USERS.map(u => u.id);
+  if (defaultUserIds.includes(id)) {
+    return false;
+  }
+  
+  // Recarregar usuários atualizados
+  ALL_USERS = loadUsersFromStorage();
+  
   const index = ALL_USERS.findIndex(u => u.id === id);
   if (index !== -1) {
     ALL_USERS.splice(index, 1);
     // Remover senha também
     delete USER_PASSWORDS[id];
+    await savePasswordsToStorage();
+    
+    // Salvar no localStorage
+    saveUsersToStorage(ALL_USERS);
+    
     return true;
   }
   return false;

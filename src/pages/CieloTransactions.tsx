@@ -21,29 +21,33 @@ const CieloTransactions = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
   const [configError, setConfigError] = useState('');
+  const [hasConfig, setHasConfig] = useState(false);
 
   useEffect(() => {
     loadTransactions();
     loadConfig();
   }, [startDate, endDate]);
 
-  const loadConfig = () => {
-    const savedConfig = getCieloConfig();
+  const loadConfig = async () => {
+    const savedConfig = await getCieloConfig();
     if (savedConfig) {
       setConfigForm(savedConfig);
     }
+    const hasConfigValue = await hasCieloConfig();
+    setHasConfig(hasConfigValue);
   };
 
-  const handleSaveConfig = () => {
+  const handleSaveConfig = async () => {
     try {
       if (!configForm.merchantId.trim() || !configForm.merchantKey.trim()) {
         setConfigError('Merchant ID e Merchant Key são obrigatórios');
         return;
       }
 
-      saveCieloConfig(configForm);
+      await saveCieloConfig(configForm);
       setConfigSaved(true);
       setConfigError('');
+      await loadConfig(); // Atualizar estado de configuração
       
       // Recarregar transações após salvar configuração
       setTimeout(() => {
@@ -56,7 +60,7 @@ const CieloTransactions = () => {
     }
   };
 
-  const handleDeleteConfig = () => {
+  const handleDeleteConfig = async () => {
     if (window.confirm('Tem certeza que deseja remover as credenciais da API Cielo?')) {
       deleteCieloConfig();
       setConfigForm({
@@ -64,13 +68,14 @@ const CieloTransactions = () => {
         merchantKey: '',
         apiUrl: 'https://api.cieloecommerce.cielo.com.br',
       });
+      setHasConfig(false);
       setShowConfigModal(false);
       loadTransactions();
     }
   };
 
-  const openConfigModal = () => {
-    loadConfig();
+  const openConfigModal = async () => {
+    await loadConfig();
     setShowConfigModal(true);
     setConfigError('');
     setConfigSaved(false);
@@ -274,19 +279,19 @@ const CieloTransactions = () => {
       </div>
 
       {/* Informações sobre Integração */}
-      <div className={`border-2 rounded-lg p-4 ${hasCieloConfig() ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+      <div className={`border-2 rounded-lg p-4 ${hasConfig ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
         <div className="flex items-start">
-          {hasCieloConfig() ? (
+          {hasConfig ? (
             <CheckCircle className="w-5 h-5 text-green-600 mr-2 mt-0.5" />
           ) : (
             <CreditCard className="w-5 h-5 text-blue-600 mr-2 mt-0.5" />
           )}
           <div className="flex-1">
-            <h3 className="font-semibold mb-1" style={{ color: hasCieloConfig() ? '#065f46' : '#1e3a8a' }}>
-              {hasCieloConfig() ? 'API Cielo Configurada' : 'Integração com API Cielo'}
+            <h3 className="font-semibold mb-1" style={{ color: hasConfig ? '#065f46' : '#1e3a8a' }}>
+              {hasConfig ? 'API Cielo Configurada' : 'Integração com API Cielo'}
             </h3>
-            <p className="text-sm" style={{ color: hasCieloConfig() ? '#047857' : '#1e40af' }}>
-              {hasCieloConfig() ? (
+            <p className="text-sm" style={{ color: hasConfig ? '#047857' : '#1e40af' }}>
+              {hasConfig ? (
                 <>
                   As credenciais da API Cielo estão configuradas. O sistema está conectado à API real.
                   {isAdmin() && (
@@ -430,7 +435,7 @@ const CieloTransactions = () => {
                 >
                   Salvar Configuração
                 </button>
-                {hasCieloConfig() && (
+                {hasConfig && (
                   <button
                     type="button"
                     onClick={handleDeleteConfig}

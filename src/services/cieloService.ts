@@ -3,8 +3,8 @@ import { CieloTransaction } from '../types';
 import { getCieloConfig } from './cieloConfigService';
 
 // Função para obter configuração atual da Cielo
-const getCurrentConfig = () => {
-  const config = getCieloConfig();
+const getCurrentConfig = async () => {
+  const config = await getCieloConfig();
   const defaultUrl = import.meta.env.VITE_CIELO_API_URL || 'https://api.cieloecommerce.cielo.com.br';
   
   return {
@@ -15,8 +15,8 @@ const getCurrentConfig = () => {
 };
 
 // Função para criar instância do axios com configuração atual
-const createCieloApi = () => {
-  const config = getCurrentConfig();
+const createCieloApi = async () => {
+  const config = await getCurrentConfig();
   
   return axios.create({
     baseURL: config.apiUrl,
@@ -35,7 +35,7 @@ export const getCieloTransactions = async (
   endDate?: string
 ): Promise<CieloTransaction[]> => {
   try {
-    const config = getCurrentConfig();
+    const config = await getCurrentConfig();
     
     // Se não houver credenciais configuradas, retornar dados mockados
     if (!config.merchantId || !config.merchantKey) {
@@ -43,7 +43,7 @@ export const getCieloTransactions = async (
     }
 
     // Chamada real à API Cielo
-    const cieloApi = createCieloApi();
+    const cieloApi = await createCieloApi();
     const response = await cieloApi.get('/1/sales', {
       params: {
         merchantOrderId: '',
@@ -64,7 +64,7 @@ export const getCieloTransactions = async (
 
 export const getCieloTransactionById = async (paymentId: string): Promise<CieloTransaction | null> => {
   try {
-    const config = getCurrentConfig();
+    const config = await getCurrentConfig();
     
     if (!config.merchantId || !config.merchantKey) {
       const mockTransactions = getMockCieloTransactions();
@@ -72,7 +72,7 @@ export const getCieloTransactionById = async (paymentId: string): Promise<CieloT
     }
 
     // Chamada real à API Cielo
-    const cieloApi = createCieloApi();
+    const cieloApi = await createCieloApi();
     const response = await cieloApi.get(`/1/sales/${paymentId}`);
     return response.data;
   } catch (error) {

@@ -1,10 +1,66 @@
 import { Customer, CieloTerminal } from '../types';
+import { hashPassword, verifyPassword, encryptObject, decryptObject } from '../utils/encryption';
 
-// Armazenamento de senhas de clientes (em produção, isso seria criptografado)
-const CUSTOMER_PASSWORDS: { [customerId: string]: string } = {};
+const STORAGE_KEY = 'brfintech_customers';
+const PASSWORDS_STORAGE_KEY = 'brfintech_customer_passwords_encrypted';
 
-// Dados de clientes - zerado e pronto para uso
-const ALL_CUSTOMERS: Customer[] = [];
+// Armazenamento de senhas de clientes com hash (protegido)
+let CUSTOMER_PASSWORDS: { [customerId: string]: string } = {};
+
+// Carregar clientes do localStorage
+const loadCustomersFromStorage = (): Customer[] => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Erro ao carregar clientes do localStorage:', error);
+  }
+  return [];
+};
+
+// Salvar clientes no localStorage
+const saveCustomersToStorage = (customers: Customer[]): void => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
+  } catch (error) {
+    console.error('Erro ao salvar clientes no localStorage:', error);
+  }
+};
+
+// Carregar senhas do localStorage (criptografadas)
+const loadPasswordsFromStorage = async (): Promise<void> => {
+  try {
+    const stored = localStorage.getItem(PASSWORDS_STORAGE_KEY);
+    if (stored) {
+      CUSTOMER_PASSWORDS = await decryptObject<{ [customerId: string]: string }>(stored);
+    }
+  } catch (error) {
+    console.error('Erro ao carregar senhas de clientes do localStorage:', error);
+    CUSTOMER_PASSWORDS = {};
+  }
+};
+
+// Salvar senhas no localStorage (criptografadas)
+const savePasswordsToStorage = async (): Promise<void> => {
+  try {
+    const encrypted = await encryptObject(CUSTOMER_PASSWORDS);
+    localStorage.setItem(PASSWORDS_STORAGE_KEY, encrypted);
+  } catch (error) {
+    console.error('Erro ao salvar senhas de clientes no localStorage:', error);
+  }
+};
+
+// Inicializar dados
+let ALL_CUSTOMERS = loadCustomersFromStorage();
+// Inicializar senhas (não bloqueia, será carregado quando necessário)
+let passwordsInitialized = false;
+loadPasswordsFromStorage().then(() => {
+  passwordsInitialized = true;
+}).catch(() => {
+  passwordsInitialized = true;
+});
 
 // Função para migrar cliente antigo (com cieloTerminalId) para novo formato (com cieloTerminals)
 const migrateCustomer = (customer: Customer): Customer => {
@@ -26,12 +82,20 @@ const migrateCustomer = (customer: Customer): Customer => {
 
 export const getCustomers = async (): Promise<Customer[]> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  // Recarregar do storage para garantir dados atualizados
+  ALL_CUSTOMERS = loadCustomersFromStorage();
   // Migrar clientes antigos ao retornar
   return ALL_CUSTOMERS.map(migrateCustomer);
 };
 
 export const getCustomerById = async (id: string): Promise<Customer | null> => {
   await new Promise(resolve => setTimeout(resolve, 200));
+  // Recarregar do storage
+  ALL_CUSTOMERS = loadCustomersFromStorage();
   const customer = ALL_CUSTOMERS.find(c => c.id === id);
   return customer ? migrateCustomer(customer) : null;
 };
@@ -65,6 +129,15 @@ export const updateCustomer = async (
   password?: string
 ): Promise<Customer | null> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  
+  // Recarregar do storage
+  ALL_CUSTOMERS = loadCustomersFromStorage();
+  
   const customer = ALL_CUSTOMERS.find(c => c.id === id);
   if (customer) {
     // Migrar antes de atualizar
@@ -77,19 +150,43 @@ export const updateCustomer = async (
       delete customer.cieloTerminalId;
     }
     
-    // Atualizar senha se fornecida
+    // Atualizar senha com hash se fornecida
     if (password) {
-      CUSTOMER_PASSWORDS[id] = password;
+      CUSTOMER_PASSWORDS[id] = await hashPassword(password);
+      await savePasswordsToStorage();
     }
+    
+    // Salvar no localStorage
+    saveCustomersToStorage(ALL_CUSTOMERS);
     
     return migrateCustomer({ ...customer });
   }
   return null;
 };
 
-// Função para obter senha do cliente
-export const getCustomerPassword = (customerId: string): string | undefined => {
+// Função para obter hash da senha do cliente
+export const getCustomerPasswordHash = (customerId: string): string | undefined => {
   return CUSTOMER_PASSWORDS[customerId];
+};
+
+// Função para verificar senha do cliente
+export const verifyCustomerPassword = async (
+  customerId: string,
+  password: string
+): Promise<boolean> => {
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  const hashedPassword = CUSTOMER_PASSWORDS[customerId];
+  if (!hashedPassword) return false;
+  return verifyPassword(password, hashedPassword);
+};
+
+// Mantido para compatibilidade (deprecated - usar verifyCustomerPassword)
+export const getCustomerPassword = (_customerId: string): string | undefined => {
+  console.warn('getCustomerPassword está deprecated. Use verifyCustomerPassword.');
+  return undefined;
 };
 
 export const createCustomer = async (
@@ -97,6 +194,14 @@ export const createCustomer = async (
   password?: string
 ): Promise<Customer> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  
+  // Recarregar clientes atualizados
+  ALL_CUSTOMERS = loadCustomersFromStorage();
   
   // Migrar cieloTerminalId para cieloTerminals se necessário
   let cieloTerminals = customer.cieloTerminals;
@@ -109,31 +214,52 @@ export const createCustomer = async (
     }];
   }
   
+  // Gerar ID único baseado no timestamp
+  const newId = `c${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const newCustomer: Customer = {
     ...customer,
-    id: `c${ALL_CUSTOMERS.length + 1}`,
+    id: newId,
     totalPurchases: customer.totalPurchases ?? 0,
     lastPurchase: customer.lastPurchase ?? new Date().toISOString().split('T')[0],
     cieloTerminals,
     cieloTerminalId: undefined, // Não usar campo antigo
   };
+  
   ALL_CUSTOMERS.push(newCustomer);
   
-  // Armazenar senha se fornecida
+  // Armazenar senha com hash se fornecida
   if (password) {
-    CUSTOMER_PASSWORDS[newCustomer.id] = password;
+    CUSTOMER_PASSWORDS[newCustomer.id] = await hashPassword(password);
+    await savePasswordsToStorage();
   }
+  
+  // Salvar no localStorage
+  saveCustomersToStorage(ALL_CUSTOMERS);
   
   return migrateCustomer(newCustomer);
 };
 
 export const deleteCustomer = async (id: string): Promise<boolean> => {
   await new Promise(resolve => setTimeout(resolve, 300));
+  
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  
+  // Recarregar clientes atualizados
+  ALL_CUSTOMERS = loadCustomersFromStorage();
+  
   const index = ALL_CUSTOMERS.findIndex(c => c.id === id);
   if (index !== -1) {
     ALL_CUSTOMERS.splice(index, 1);
     // Remover senha também
     delete CUSTOMER_PASSWORDS[id];
+    await savePasswordsToStorage();
+    
+    // Salvar no localStorage
+    saveCustomersToStorage(ALL_CUSTOMERS);
+    
     return true;
   }
   return false;

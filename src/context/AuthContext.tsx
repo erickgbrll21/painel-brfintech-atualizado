@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
-import { getUsers, getUserPasswordByEmail } from '../services/userService';
-import { getCustomers, getCustomerPassword } from '../services/customerService';
+import { getUsers, verifyUserPasswordByEmail } from '../services/userService';
+import { getCustomers, verifyCustomerPassword } from '../services/customerService';
+import { encryptObject, decryptObject } from '../utils/encryption';
 
 interface AuthContextType {
   user: User | null;
@@ -19,12 +20,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Verificar se há usuário salvo no localStorage
-    const savedUser = localStorage.getItem('brfintech_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setIsLoading(false);
+    // Verificar se há usuário salvo no localStorage (criptografado)
+    const loadUser = async () => {
+      try {
+        const encryptedUser = localStorage.getItem('brfintech_user_encrypted');
+        if (encryptedUser) {
+          const decryptedUser = await decryptObject<User>(encryptedUser);
+          setUser(decryptedUser);
+        } else {
+          // Migração: tentar carregar usuário antigo não criptografado
+          const savedUser = localStorage.getItem('brfintech_user');
+          if (savedUser) {
+            const user = JSON.parse(savedUser);
+            setUser(user);
+            // Criptografar e migrar
+            const encrypted = await encryptObject(user);
+            localStorage.setItem('brfintech_user_encrypted', encrypted);
+            localStorage.removeItem('brfintech_user');
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao carregar usuário:', error);
+        localStorage.removeItem('brfintech_user');
+        localStorage.removeItem('brfintech_user_encrypted');
+      }
+      setIsLoading(false);
+    };
+    loadUser();
   }, []);
 
   const login = async (emailOrUsername: string, password: string): Promise<boolean> => {
@@ -34,17 +56,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const foundUser = users.find(u => u.email === emailOrUsername);
       
       if (foundUser) {
-        // Verificar senha do usuário administrativo
-        const userPassword = getUserPasswordByEmail(emailOrUsername);
-        
-        // Se não houver senha cadastrada, usar senha padrão para usuários antigos
-        const isValidPassword = userPassword 
-          ? userPassword === password 
-          : password === '123456';
+        // Verificar senha do usuário administrativo usando hash
+        const isValidPassword = await verifyUserPasswordByEmail(emailOrUsername, password);
         
         if (isValidPassword) {
           setUser(foundUser);
-          localStorage.setItem('brfintech_user', JSON.stringify(foundUser));
+          // Criptografar dados do usuário antes de salvar
+          const encryptedUser = await encryptObject(foundUser);
+          localStorage.setItem('brfintech_user_encrypted', encryptedUser);
+          // Remover versão antiga se existir
+          localStorage.removeItem('brfintech_user');
           return true;
         }
         
@@ -56,10 +77,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const foundCustomer = customers.find(c => c.username === emailOrUsername);
       
       if (foundCustomer) {
-        // Verificar senha do cliente
-        const customerPassword = getCustomerPassword(foundCustomer.id);
+        // Verificar senha do cliente usando hash
+        const isValidPassword = await verifyCustomerPassword(foundCustomer.id, password);
         
-        if (customerPassword && customerPassword === password) {
+        if (isValidPassword) {
           // Criar objeto User temporário para o cliente
           const customerAsUser: User = {
             id: `customer_${foundCustomer.id}`,
@@ -71,7 +92,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
           
           setUser(customerAsUser);
-          localStorage.setItem('brfintech_user', JSON.stringify(customerAsUser));
+          // Criptografar dados do usuário antes de salvar
+          const encryptedUser = await encryptObject(customerAsUser);
+          localStorage.setItem('brfintech_user_encrypted', encryptedUser);
+          // Remover versão antiga se existir
+          localStorage.removeItem('brfintech_user');
           return true;
         }
       }
@@ -86,6 +111,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = () => {
     setUser(null);
     localStorage.removeItem('brfintech_user');
+    localStorage.removeItem('brfintech_user_encrypted');
   };
 
   const isAdmin = (): boolean => {
