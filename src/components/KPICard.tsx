@@ -12,16 +12,24 @@ const KPICard = ({ title, value, change, icon: Icon, format = 'number' }: KPICar
   const formatValue = (val: string | number): string => {
     if (typeof val === 'string') return val;
     
+    // Garantir que o valor seja um número válido
+    if (isNaN(val) || val === null || val === undefined) return '0';
+    
     switch (format) {
       case 'currency':
         return new Intl.NumberFormat('pt-BR', {
           style: 'currency',
           currency: 'BRL',
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
         }).format(val);
       case 'percentage':
         return `${val.toFixed(2)}%`;
       default:
-        return new Intl.NumberFormat('pt-BR').format(val);
+        return new Intl.NumberFormat('pt-BR', {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(val);
     }
   };
 
@@ -36,7 +44,7 @@ const KPICard = ({ title, value, change, icon: Icon, format = 'number' }: KPICar
         </div>
       </div>
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-xl md:text-2xl lg:text-3xl font-bold text-black break-words flex-1 min-w-0">{formatValue(value)}</p>
+        <p className="text-xl md:text-2xl lg:text-3xl font-bold text-black break-words flex-1 min-w-0 overflow-visible whitespace-normal">{formatValue(value)}</p>
         {change !== undefined && (
           <span
             className={`text-xs md:text-sm font-semibold flex-shrink-0 ${

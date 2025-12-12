@@ -51,6 +51,7 @@ const TerminalDashboard = () => {
     return `${monthNames[parseInt(monthNum) - 1]}/${year}`;
   };
 
+
   // Carregar informações da conta
   // Atualizar automaticamente quando a planilha for reimportada
   useEffect(() => {
@@ -148,46 +149,8 @@ const TerminalDashboard = () => {
               setSelectedDay('');
             }
             
-            // Buscar valores customizados específicos da planilha selecionada
-            // Determinar qual planilha está ativa para buscar valores específicos
-            let activeSpreadsheet: SpreadsheetData | null = null;
-            if (activeTab === 'monthly' && spreadsheetData && spreadsheetData.data && spreadsheetData.data.length > 0) {
-              activeSpreadsheet = spreadsheetData;
-            } else if (activeTab === 'daily' && spreadsheetDataDaily && spreadsheetDataDaily.data && spreadsheetDataDaily.data.length > 0) {
-              activeSpreadsheet = spreadsheetDataDaily;
-            }
-            
-            if (activeSpreadsheet) {
-              const customValues = getCustomerCardValues(
-                user.customerId, 
-                terminalId,
-                activeSpreadsheet.referenceMonth,
-                activeSpreadsheet.referenceDate,
-                activeSpreadsheet.type || 'monthly'
-              );
-              
-              if (customValues) {
-                // Usar valores customizados
-                setSpreadsheetMetrics({
-                  totalVendas: customValues.quantidadeVendas || 0,
-                  valorBrutoTotal: customValues.valorBruto || 0,
-                  taxaMedia: customValues.taxa || 0,
-                  valorLiquidoTotal: customValues.valorLiquido || 0,
-                });
-              } else {
-                // Se não houver valores customizados, calcular da planilha
-                const metrics = calculateSpreadsheetMetrics(activeSpreadsheet);
-                setSpreadsheetMetrics({
-                  totalVendas: metrics.totalVendas || 0,
-                  valorBrutoTotal: metrics.valorBrutoTotal || 0,
-                  taxaMedia: metrics.taxaMedia || 0,
-                  valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
-                });
-              }
-            } else {
-              // Se não houver planilha selecionada, não mostrar métricas
-              setSpreadsheetMetrics(null);
-            }
+            // NÃO atualizar valores dos cards aqui - isso será feito em um useEffect separado
+            // que só executa quando há mudança explícita (troca de aba, seleção de mês/dia, etc.)
             
             const terminalIds = terminals.map(t => t.terminalId);
             if (!terminalIds.includes(terminalId)) {
@@ -282,46 +245,9 @@ const TerminalDashboard = () => {
       }
       setSpreadsheetDataDaily(spreadsheetDaily);
       
-      // Buscar valores customizados específicos da planilha selecionada
-      // Determinar qual planilha está ativa para buscar valores específicos
-      let activeSpreadsheet: SpreadsheetData | null = null;
-      if (activeTab === 'monthly' && spreadsheet && spreadsheet.data && spreadsheet.data.length > 0) {
-        activeSpreadsheet = spreadsheet;
-      } else if (activeTab === 'daily' && spreadsheetDaily && spreadsheetDaily.data && spreadsheetDaily.data.length > 0) {
-        activeSpreadsheet = spreadsheetDaily;
-      }
-      
-      if (activeSpreadsheet) {
-        const customValues = getCustomerCardValues(
-          user.customerId, 
-          terminalId,
-          activeSpreadsheet.referenceMonth,
-          activeSpreadsheet.referenceDate,
-          activeSpreadsheet.type || 'monthly'
-        );
-        
-        if (customValues) {
-          // Usar valores customizados
-          setSpreadsheetMetrics({
-            totalVendas: customValues.quantidadeVendas || 0,
-            valorBrutoTotal: customValues.valorBruto || 0,
-            taxaMedia: customValues.taxa || 0,
-            valorLiquidoTotal: customValues.valorLiquido || 0,
-          });
-        } else {
-          // Se não houver valores customizados, calcular da planilha
-          const metrics = calculateSpreadsheetMetrics(activeSpreadsheet);
-          setSpreadsheetMetrics({
-            totalVendas: metrics.totalVendas || 0,
-            valorBrutoTotal: metrics.valorBrutoTotal || 0,
-            taxaMedia: metrics.taxaMedia || 0,
-            valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
-          });
-        }
-      } else {
-        // Se não houver planilha selecionada, não mostrar métricas
-        setSpreadsheetMetrics(null);
-      }
+      // NÃO atualizar valores dos cards aqui - isso será feito apenas nos useEffects
+      // que são executados quando há mudança explícita (troca de aba, seleção de mês/dia, etc.)
+      // Esta função apenas atualiza os dados das planilhas, não os valores exibidos nos cards
       
         hashRef.current = currentHash;
     };
@@ -375,7 +301,96 @@ const TerminalDashboard = () => {
       window.removeEventListener('spreadsheetUpdated', handleSpreadsheetUpdate as EventListener);
       window.removeEventListener('cardValuesUpdated', handleCardValuesUpdate as EventListener);
     };
-  }, [terminalId, isCustomer, user?.customerId]);
+  }, [terminalId, isCustomer, user?.customerId, selectedMonth, selectedDay, activeTab]);
+
+  // useEffect SEPARADO para atualizar valores dos cards apenas quando houver mudança explícita
+  // (troca de aba, seleção de mês/dia, etc.) - NÃO executa a cada 5 segundos
+  useEffect(() => {
+    if (!isCustomer() || !user?.customerId || !terminalId) {
+      return;
+    }
+
+    const updateCardValues = () => {
+      // Garantir que temos customerId e terminalId (TypeScript não infere isso mesmo com o check acima)
+      if (!user?.customerId || !terminalId) return;
+      const customerId = user.customerId;
+      
+      // Determinar qual planilha usar baseado na aba ativa
+      let activeSpreadsheet: SpreadsheetData | null = null;
+      
+      if (activeTab === 'monthly') {
+        // Para mensal, APENAS usar planilhas mensais
+        if (selectedMonth) {
+          const monthSpreadsheet = getSpreadsheetByTerminalId(terminalId, customerId, selectedMonth, 'monthly');
+          if (monthSpreadsheet && (monthSpreadsheet.type || 'monthly') === 'monthly') {
+            activeSpreadsheet = monthSpreadsheet;
+          } else if (spreadsheetData && (spreadsheetData.type || 'monthly') === 'monthly') {
+            activeSpreadsheet = spreadsheetData;
+          }
+        } else {
+          if (spreadsheetData && (spreadsheetData.type || 'monthly') === 'monthly') {
+            activeSpreadsheet = spreadsheetData;
+          }
+        }
+      } else if (activeTab === 'daily') {
+        // Para diária, APENAS usar planilhas diárias
+        if (selectedDay) {
+          const day = selectedDay; // Criar variável local para ajudar TypeScript
+          const daySpreadsheet = getSpreadsheetByDate(customerId, day, terminalId || undefined);
+          if (daySpreadsheet && daySpreadsheet.type === 'daily') {
+            activeSpreadsheet = daySpreadsheet;
+          } else if (spreadsheetDataDaily && spreadsheetDataDaily.type === 'daily') {
+            activeSpreadsheet = spreadsheetDataDaily;
+          }
+        } else {
+          if (spreadsheetDataDaily && spreadsheetDataDaily.type === 'daily') {
+            activeSpreadsheet = spreadsheetDataDaily;
+          }
+        }
+      }
+      
+      // Atualizar valores apenas se houver planilha válida do tipo correto
+      if (activeSpreadsheet && activeSpreadsheet.data && activeSpreadsheet.data.length > 0) {
+        const isDailyType = activeTab === 'daily';
+        const spreadsheetIsDaily = activeSpreadsheet.type === 'daily';
+        
+        if (isDailyType === spreadsheetIsDaily) {
+          const customValues = getCustomerCardValues(
+            customerId, 
+            terminalId || undefined,
+            spreadsheetIsDaily ? undefined : activeSpreadsheet.referenceMonth,
+            spreadsheetIsDaily ? activeSpreadsheet.referenceDate : undefined,
+            activeSpreadsheet.type || (activeTab === 'daily' ? 'daily' : 'monthly')
+          );
+        
+          if (customValues) {
+            setSpreadsheetMetrics({
+              totalVendas: customValues.quantidadeVendas || 0,
+              valorBrutoTotal: customValues.valorBruto || 0,
+              taxaMedia: customValues.taxa || 0,
+              valorLiquidoTotal: customValues.valorLiquido || 0,
+              hasCustomValues: true,
+            });
+          } else {
+            const metrics = calculateSpreadsheetMetrics(activeSpreadsheet);
+            setSpreadsheetMetrics({
+              totalVendas: metrics.totalVendas || 0,
+              valorBrutoTotal: metrics.valorBrutoTotal || 0,
+              taxaMedia: metrics.taxaMedia || 0,
+              valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+              hasCustomValues: false,
+            });
+          }
+        }
+      } else if (activeTab === 'monthly' && (!spreadsheetData || !spreadsheetData.data || spreadsheetData.data.length === 0)) {
+        setSpreadsheetMetrics(null);
+      } else if (activeTab === 'daily' && (!spreadsheetDataDaily || !spreadsheetDataDaily.data || spreadsheetDataDaily.data.length === 0)) {
+        setSpreadsheetMetrics(null);
+      }
+    };
+
+    updateCardValues();
+  }, [isCustomer, user?.customerId, terminalId, selectedMonth, selectedDay, activeTab, spreadsheetData, spreadsheetDataDaily]);
 
   const handleFilterChange = useCallback((newFilters: FilterOptions) => {
     setFilters(prevFilters => {
@@ -526,7 +541,7 @@ const TerminalDashboard = () => {
             title="Taxa"
             value={spreadsheetMetrics?.taxaMedia ?? 0}
             icon={Percent}
-            format="percentage"
+            format={spreadsheetMetrics?.hasCustomValues ? "currency" : "percentage"}
           />
           <KPICard
             title="Valor Líquido"
@@ -557,7 +572,48 @@ const TerminalDashboard = () => {
           <div className="border-b-2 border-black">
             <div className="flex">
               <button
-                onClick={() => setActiveTab('monthly')}
+                onClick={() => {
+                  setActiveTab('monthly');
+                  // Atualizar métricas imediatamente ao trocar para aba mensal
+                  if (user?.customerId && terminalId) {
+                    let monthSpreadsheet: SpreadsheetData | null = null;
+                    if (selectedMonth) {
+                      monthSpreadsheet = getSpreadsheetByTerminalId(terminalId, user.customerId, selectedMonth, 'monthly');
+                    } else if (spreadsheetData) {
+                      monthSpreadsheet = spreadsheetData;
+                    }
+                    
+                    if (monthSpreadsheet && monthSpreadsheet.data && monthSpreadsheet.data.length > 0) {
+                      const customValues = getCustomerCardValues(
+                        user.customerId, 
+                        terminalId,
+                        monthSpreadsheet.referenceMonth,
+                        undefined, // Não usar referenceDate para mensais
+                        'monthly'
+                      );
+                      if (customValues) {
+                        setSpreadsheetMetrics({
+                          totalVendas: customValues.quantidadeVendas || 0,
+                          valorBrutoTotal: customValues.valorBruto || 0,
+                          taxaMedia: customValues.taxa || 0,
+                          valorLiquidoTotal: customValues.valorLiquido || 0,
+                          hasCustomValues: true,
+                        });
+                      } else {
+                        const metrics = calculateSpreadsheetMetrics(monthSpreadsheet);
+                        setSpreadsheetMetrics({
+                          totalVendas: metrics.totalVendas || 0,
+                          valorBrutoTotal: metrics.valorBrutoTotal || 0,
+                          taxaMedia: metrics.taxaMedia || 0,
+                          valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+                          hasCustomValues: false,
+                        });
+                      }
+                    } else {
+                      setSpreadsheetMetrics(null);
+                    }
+                  }
+                }}
                 className={`flex-1 py-3 px-4 font-semibold transition-colors ${
                   activeTab === 'monthly'
                     ? 'bg-black text-white'
@@ -567,7 +623,48 @@ const TerminalDashboard = () => {
                 📊 Planilha Mensal
               </button>
               <button
-                onClick={() => setActiveTab('daily')}
+                onClick={() => {
+                  setActiveTab('daily');
+                  // Atualizar métricas imediatamente ao trocar para aba diária
+                  if (user?.customerId) {
+                    let daySpreadsheet: SpreadsheetData | null = null;
+                    if (selectedDay) {
+                      daySpreadsheet = getSpreadsheetByDate(user.customerId, selectedDay, terminalId);
+                    } else if (spreadsheetDataDaily) {
+                      daySpreadsheet = spreadsheetDataDaily;
+                    }
+                    
+                    if (daySpreadsheet && daySpreadsheet.data && daySpreadsheet.data.length > 0) {
+                      const customValues = getCustomerCardValues(
+                        user.customerId, 
+                        terminalId,
+                        undefined, // Não usar referenceMonth para diárias
+                        daySpreadsheet.referenceDate,
+                        'daily'
+                      );
+                      if (customValues) {
+                        setSpreadsheetMetrics({
+                          totalVendas: customValues.quantidadeVendas || 0,
+                          valorBrutoTotal: customValues.valorBruto || 0,
+                          taxaMedia: customValues.taxa || 0,
+                          valorLiquidoTotal: customValues.valorLiquido || 0,
+                          hasCustomValues: true,
+                        });
+                      } else {
+                        const metrics = calculateSpreadsheetMetrics(daySpreadsheet);
+                        setSpreadsheetMetrics({
+                          totalVendas: metrics.totalVendas || 0,
+                          valorBrutoTotal: metrics.valorBrutoTotal || 0,
+                          taxaMedia: metrics.taxaMedia || 0,
+                          valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+                          hasCustomValues: false,
+                        });
+                      }
+                    } else {
+                      setSpreadsheetMetrics(null);
+                    }
+                  }
+                }}
                 className={`flex-1 py-3 px-4 font-semibold transition-colors ${
                   activeTab === 'daily'
                     ? 'bg-black text-white'
@@ -866,11 +963,13 @@ const TerminalDashboard = () => {
               
               // Buscar valores customizados específicos da planilha selecionada
               if (spreadsheet && spreadsheet.data && spreadsheet.data.length > 0) {
+                // Para planilhas diárias, usar apenas referenceDate; para mensais, usar referenceMonth
+                const isDaily = spreadsheet.type === 'daily';
                 const customValues = getCustomerCardValues(
                   user.customerId, 
                   terminalId,
-                  spreadsheet.referenceMonth,
-                  spreadsheet.referenceDate,
+                  isDaily ? undefined : spreadsheet.referenceMonth, // Não usar referenceMonth para diárias
+                  isDaily ? spreadsheet.referenceDate : undefined, // Usar referenceDate apenas para diárias
                   spreadsheet.type || 'monthly'
                 );
                 
@@ -881,6 +980,7 @@ const TerminalDashboard = () => {
                     valorBrutoTotal: customValues.valorBruto || 0,
                     taxaMedia: customValues.taxa || 0,
                     valorLiquidoTotal: customValues.valorLiquido || 0,
+                    hasCustomValues: true,
                   });
                 } else {
                   // Se não houver valores customizados, calcular da planilha
@@ -890,6 +990,7 @@ const TerminalDashboard = () => {
                     valorBrutoTotal: metrics.valorBrutoTotal || 0,
                     taxaMedia: metrics.taxaMedia || 0,
                     valorLiquidoTotal: metrics.valorLiquidoTotal || 0,
+                    hasCustomValues: false,
                   });
                 }
               } else {

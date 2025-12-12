@@ -45,17 +45,32 @@ export const getCustomerCardValues = (
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     const allValues = stored ? JSON.parse(stored) : {};
-    const key = getStorageKey(customerId, terminalId, referenceMonth, referenceDate, type);
-    const value = allValues[key];
+    
+    // Tentar buscar com os parâmetros específicos primeiro
+    const specificKey = getStorageKey(customerId, terminalId, referenceMonth, referenceDate, type);
+    let value = allValues[specificKey];
+    
+    // Se não encontrou com parâmetros específicos, tentar buscar valores gerais do mesmo tipo
+    // (sem referenceMonth/referenceDate, mas mantendo o tipo para não misturar monthly com daily)
+    if (!value && type) {
+      const generalKeySameType = getStorageKey(customerId, terminalId, undefined, undefined, type);
+      value = allValues[generalKeySameType];
+    }
+    
+    // Se ainda não encontrou, tentar buscar valores gerais sem tipo (último recurso)
+    if (!value) {
+      const generalKey = getStorageKey(customerId, terminalId, undefined, undefined, undefined);
+      value = allValues[generalKey];
+    }
     
     if (value) {
       return {
         ...value,
         customerId,
-        terminalId: terminalId || undefined,
-        referenceMonth: referenceMonth || undefined,
-        referenceDate: referenceDate || undefined,
-        type: type || undefined,
+        terminalId: terminalId || value.terminalId || undefined,
+        referenceMonth: referenceMonth || value.referenceMonth || undefined,
+        referenceDate: referenceDate || value.referenceDate || undefined,
+        type: type || value.type || undefined,
       };
     }
     

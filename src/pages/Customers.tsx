@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getCustomers, updateCustomer, createCustomer, deleteCustomer } from '../services/customerService';
 import { saveCustomerTax } from '../services/customerTaxService';
-import { getCustomerCardValues, saveCustomerCardValues, deleteCustomerCardValues } from '../services/customerCardValuesService';
+import { saveCustomerCardValues, deleteCustomerCardValues } from '../services/customerCardValuesService';
 import { Customer, CieloTerminal } from '../types';
 import { Plus, Edit, Trash2, Shield, Search, Building2, CreditCard, X, ExternalLink, DollarSign, FileSpreadsheet, Percent, Settings } from 'lucide-react';
 import CustomerSpreadsheet from '../components/CustomerSpreadsheet';
@@ -18,6 +18,65 @@ const Customers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [sortBy, setSortBy] = useState<'name'>('name');
+
+  // Função para converter valor formatado brasileiro para número
+  const parseValorBrasileiro = (valor: string): number => {
+    if (!valor) return 0;
+    
+    // Remove caracteres não numéricos exceto vírgula e ponto
+    let valorLimpo = valor.replace(/[^\d,.-]/g, '');
+    
+    // Se não tem vírgula, pode ser formato americano ou número sem decimais
+    if (!valorLimpo.includes(',')) {
+      // Se tem ponto, pode ser formato americano (ex: 51242.29)
+      if (valorLimpo.includes('.')) {
+        return parseFloat(valorLimpo) || 0;
+      }
+      // Se não tem nem vírgula nem ponto, é número inteiro
+      return parseFloat(valorLimpo) || 0;
+    }
+    
+    // Formato brasileiro: ponto = milhar, vírgula = decimal
+    // Exemplo: 51.242,29 -> 51242.29
+    // Remove pontos (separadores de milhar)
+    valorLimpo = valorLimpo.replace(/\./g, '');
+    // Substitui vírgula (decimal) por ponto para parseFloat
+    valorLimpo = valorLimpo.replace(',', '.');
+    
+    return parseFloat(valorLimpo) || 0;
+  };
+
+  // Função para formatar número no formato brasileiro (1.000,00)
+  const formatarValorBrasileiro = (valor: string | number): string => {
+    // Se receber número, formatar diretamente
+    if (typeof valor === 'number') {
+      if (isNaN(valor) || valor < 0) return '';
+      return valor.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+    
+    // Se receber string, primeiro converter para número
+    const valorNum = parseValorBrasileiro(valor);
+    
+    if (isNaN(valorNum) || valorNum < 0) return '';
+    
+    // Formatar com pontos para milhares e vírgula para decimais
+    return valorNum.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
+  
+  // Função para limpar e normalizar entrada do usuário (permite digitação livre)
+  const normalizarEntrada = (valor: string): string => {
+    // Remove tudo exceto números, vírgula e ponto
+    return valor.replace(/[^\d,.-]/g, '');
+  };
+  
+  // Constante da taxa: 5,10%
+  const TAXA_PERCENTUAL = 5.10;
 
   const initialFormData = {
     name: '',
@@ -403,18 +462,18 @@ const Customers = () => {
                               {isAdmin() && (
                                 <button
                                   onClick={() => {
-                                    const cardValues = getCustomerCardValues(customer.id, term.terminalId);
                                     setSelectedCustomerForCards({ 
                                       id: customer.id, 
                                       name: customer.name,
                                       terminalId: term.terminalId,
                                       terminalName: term.name || term.terminalId
                                     });
+                                    // Campos zerados ao abrir o modal
                                     setCardValues({
-                                      quantidadeVendas: cardValues?.quantidadeVendas?.toString() || '',
-                                      valorBruto: cardValues?.valorBruto?.toString() || '',
-                                      taxa: cardValues?.taxa?.toString() || '',
-                                      valorLiquido: cardValues?.valorLiquido?.toString() || '',
+                                      quantidadeVendas: '',
+                                      valorBruto: '',
+                                      taxa: '',
+                                      valorLiquido: '',
                                     });
                                   }}
                                   className="p-1 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded transition-colors"
@@ -920,30 +979,101 @@ const Customers = () => {
                   Valor Bruto (R$)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
                   value={cardValues.valorBruto}
-                  onChange={(e) => setCardValues({ ...cardValues, valorBruto: e.target.value })}
-                  placeholder="Deixe vazio para usar valor da planilha"
+                  onChange={(e) => {
+                    let valorBruto = e.target.value;
+                    
+                    // Se vazio, limpar tudo
+                    if (!valorBruto || valorBruto.trim() === '') {
+                      setCardValues({ ...cardValues, valorBruto: '', taxa: '', valorLiquido: '' });
+                      return;
+                    }
+                    
+                    // Normalizar entrada (remove caracteres inválidos, mas mantém números, vírgula e ponto)
+                    valorBruto = normalizarEntrada(valorBruto);
+                    
+                    // Converter para número (remove formatação)
+                    const valorBrutoNum = parseValorBrasileiro(valorBruto);
+                    
+                    // Atualizar campo com valor normalizado (permite digitação livre)
+                    setCardValues({ ...cardValues, valorBruto: valorBruto });
+                    
+                      // Se o valor é válido, calcular e formatar os outros campos
+                      if (valorBrutoNum > 0) {
+                        // Calcular taxa automaticamente (5,10%)
+                        const taxaCalculada = (valorBrutoNum * TAXA_PERCENTUAL) / 100;
+                        // Calcular valor líquido automaticamente
+                        const valorLiquidoCalculado = valorBrutoNum - taxaCalculada;
+                      
+                      // Formatar apenas os campos calculados
+                      const taxaFormatada = formatarValorBrasileiro(taxaCalculada);
+                      const valorLiquidoFormatado = formatarValorBrasileiro(valorLiquidoCalculado);
+                      
+                      setCardValues({
+                        ...cardValues,
+                        valorBruto: valorBruto, // Mantém o valor digitado sem formatar ainda
+                        taxa: taxaFormatada,
+                        valorLiquido: valorLiquidoFormatado,
+                      });
+                    }
+                  }}
+                  onBlur={(e) => {
+                    // Quando o campo perde o foco, formatar o valor bruto
+                    const valorBruto = e.target.value;
+                    if (valorBruto) {
+                      const valorBrutoNum = parseValorBrasileiro(valorBruto);
+                      if (valorBrutoNum > 0) {
+                        const valorBrutoFormatado = formatarValorBrasileiro(valorBrutoNum);
+                        setCardValues({ ...cardValues, valorBruto: valorBrutoFormatado });
+                      }
+                    }
+                  }}
+                  placeholder="0,00"
                   className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Ao inserir o valor bruto, a taxa (5,10% em R$) e o valor líquido serão calculados automaticamente.
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-black mb-2">
-                  Taxa (%)
+                  Taxa (R$)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
+                  type="text"
                   value={cardValues.taxa}
-                  onChange={(e) => setCardValues({ ...cardValues, taxa: e.target.value })}
-                  placeholder="Deixe vazio para usar valor da planilha"
+                  onChange={(e) => {
+                    const taxa = e.target.value;
+                    
+                    // Se vazio, limpar
+                    if (!taxa || taxa.trim() === '') {
+                      setCardValues({ ...cardValues, taxa: '' });
+                      return;
+                    }
+                    
+                    const taxaNum = parseValorBrasileiro(taxa);
+                    const taxaFormatada = taxaNum > 0 ? formatarValorBrasileiro(taxaNum.toString()) : taxa;
+                    
+                    setCardValues({ ...cardValues, taxa: taxaFormatada });
+                    
+                    // Recalcular valor líquido se houver valor bruto
+                    if (cardValues.valorBruto && taxaNum > 0) {
+                      const valorBrutoNum = parseValorBrasileiro(cardValues.valorBruto);
+                      if (valorBrutoNum > 0) {
+                        const valorLiquidoCalculado = valorBrutoNum - taxaNum;
+                        const valorLiquidoFormatado = formatarValorBrasileiro(valorLiquidoCalculado.toString());
+                        setCardValues({ ...cardValues, taxa: taxaFormatada, valorLiquido: valorLiquidoFormatado });
+                      }
+                    }
+                  }}
+                  placeholder="0,00"
                   className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Taxa calculada automaticamente: 5,10% do valor bruto (em R$).
+                </p>
               </div>
 
               <div>
@@ -951,14 +1081,15 @@ const Customers = () => {
                   Valor Líquido (R$)
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="text"
                   value={cardValues.valorLiquido}
-                  onChange={(e) => setCardValues({ ...cardValues, valorLiquido: e.target.value })}
-                  placeholder="Deixe vazio para usar valor da planilha"
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                  readOnly
+                  placeholder="0,00"
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors bg-gray-50"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Valor líquido calculado automaticamente (Valor Bruto - Taxa).
+                </p>
               </div>
             </div>
 
@@ -966,10 +1097,10 @@ const Customers = () => {
               <button
                 onClick={() => {
                   const values: any = {};
-                  if (cardValues.quantidadeVendas) values.quantidadeVendas = parseFloat(cardValues.quantidadeVendas);
-                  if (cardValues.valorBruto) values.valorBruto = parseFloat(cardValues.valorBruto);
-                  if (cardValues.taxa) values.taxa = parseFloat(cardValues.taxa);
-                  if (cardValues.valorLiquido) values.valorLiquido = parseFloat(cardValues.valorLiquido);
+                  if (cardValues.quantidadeVendas) values.quantidadeVendas = parseFloat(cardValues.quantidadeVendas.replace(/[^\d,.-]/g, '').replace(',', '.'));
+                  if (cardValues.valorBruto) values.valorBruto = parseValorBrasileiro(cardValues.valorBruto);
+                  if (cardValues.taxa) values.taxa = parseValorBrasileiro(cardValues.taxa);
+                  if (cardValues.valorLiquido) values.valorLiquido = parseValorBrasileiro(cardValues.valorLiquido);
                   
                   if (Object.keys(values).length > 0) {
                     saveCustomerCardValues(selectedCustomerForCards.id, values, user?.id, selectedCustomerForCards.terminalId);

@@ -36,6 +36,65 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
   });
   const [spreadsheetMetrics, setSpreadsheetMetrics] = useState<any>(null);
   
+  // Função para converter valor formatado brasileiro para número
+  const parseValorBrasileiro = (valor: string): number => {
+    if (!valor) return 0;
+    
+    // Remove caracteres não numéricos exceto vírgula e ponto
+    let valorLimpo = valor.replace(/[^\d,.-]/g, '');
+    
+    // Se não tem vírgula, pode ser formato americano ou número sem decimais
+    if (!valorLimpo.includes(',')) {
+      // Se tem ponto, pode ser formato americano (ex: 51242.29)
+      if (valorLimpo.includes('.')) {
+        return parseFloat(valorLimpo) || 0;
+      }
+      // Se não tem nem vírgula nem ponto, é número inteiro
+      return parseFloat(valorLimpo) || 0;
+    }
+    
+    // Formato brasileiro: ponto = milhar, vírgula = decimal
+    // Exemplo: 51.242,29 -> 51242.29
+    // Remove pontos (separadores de milhar)
+    valorLimpo = valorLimpo.replace(/\./g, '');
+    // Substitui vírgula (decimal) por ponto para parseFloat
+    valorLimpo = valorLimpo.replace(',', '.');
+    
+    return parseFloat(valorLimpo) || 0;
+  };
+
+  // Função para formatar número no formato brasileiro (1.000,00)
+  const formatarValorBrasileiro = (valor: string | number): string => {
+    // Se receber número, formatar diretamente
+    if (typeof valor === 'number') {
+      if (isNaN(valor) || valor < 0) return '';
+      return valor.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+    
+    // Se receber string, primeiro converter para número
+    const valorNum = parseValorBrasileiro(valor);
+    
+    if (isNaN(valorNum) || valorNum < 0) return '';
+    
+    // Formatar com pontos para milhares e vírgula para decimais
+    return valorNum.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
+  
+  // Função para limpar e normalizar entrada do usuário (permite digitação livre)
+  const normalizarEntrada = (valor: string): string => {
+    // Remove tudo exceto números, vírgula e ponto
+    return valor.replace(/[^\d,.-]/g, '');
+  };
+  
+  // Constante da taxa: 5,10%
+  const TAXA_PERCENTUAL = 5.10;
+  
   // Função para formatar mês (YYYY-MM) para exibição (MM/YYYY)
   const formatMonth = (month: string): string => {
     if (!month) return '';
@@ -114,7 +173,8 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
       const metrics = calculateSpreadsheetMetrics(spreadsheetData);
       setSpreadsheetMetrics(metrics);
       
-      // Carregar valores customizados específicos desta planilha
+      // Carregar valores customizados específicos desta planilha (se existirem)
+      // Não preencher automaticamente com valores calculados - apenas manualmente
       const customValues = getCustomerCardValues(
         customerId, 
         terminalId,
@@ -123,19 +183,20 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
         spreadsheetData.type || 'monthly'
       );
       if (customValues) {
+        // Se houver valores customizados salvos, carregar eles
         setCardValues({
-          quantidadeVendas: String(customValues.quantidadeVendas || ''),
-          valorBruto: String(customValues.valorBruto || ''),
-          taxa: String(customValues.taxa || ''),
-          valorLiquido: String(customValues.valorLiquido || ''),
+          quantidadeVendas: customValues.quantidadeVendas ? formatarValorBrasileiro(customValues.quantidadeVendas.toString()) : '',
+          valorBruto: customValues.valorBruto ? formatarValorBrasileiro(customValues.valorBruto.toString()) : '',
+          taxa: customValues.taxa ? formatarValorBrasileiro(customValues.taxa.toString()) : '',
+          valorLiquido: customValues.valorLiquido ? formatarValorBrasileiro(customValues.valorLiquido.toString()) : '',
         });
       } else {
-        // Usar valores calculados da planilha
+        // Não preencher automaticamente - campos ficam vazios para preenchimento manual
         setCardValues({
-          quantidadeVendas: String(metrics.totalVendas || ''),
-          valorBruto: String(metrics.valorBrutoTotal || ''),
-          taxa: String(metrics.taxaMedia || ''),
-          valorLiquido: String(metrics.valorLiquidoTotal || ''),
+          quantidadeVendas: '',
+          valorBruto: '',
+          taxa: '',
+          valorLiquido: '',
         });
       }
     } else {
@@ -477,29 +538,13 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
 
   const handleOpenEditCardValues = () => {
     if (spreadsheetData && spreadsheetMetrics) {
-      // Carregar valores customizados específicos desta planilha
-      const customValues = getCustomerCardValues(
-        customerId, 
-        terminalId,
-        spreadsheetData.referenceMonth,
-        spreadsheetData.referenceDate,
-        spreadsheetData.type || 'monthly'
-      );
-      if (customValues) {
-        setCardValues({
-          quantidadeVendas: String(customValues.quantidadeVendas || ''),
-          valorBruto: String(customValues.valorBruto || ''),
-          taxa: String(customValues.taxa || ''),
-          valorLiquido: String(customValues.valorLiquido || ''),
-        });
-      } else {
-        setCardValues({
-          quantidadeVendas: String(spreadsheetMetrics.totalVendas || ''),
-          valorBruto: String(spreadsheetMetrics.valorBrutoTotal || ''),
-          taxa: String(spreadsheetMetrics.taxaMedia || ''),
-          valorLiquido: String(spreadsheetMetrics.valorLiquidoTotal || ''),
-        });
-      }
+      // Campos zerados ao abrir o modal
+      setCardValues({
+        quantidadeVendas: '',
+        valorBruto: '',
+        taxa: '',
+        valorLiquido: '',
+      });
       setShowEditCardValues(true);
     }
   };
@@ -508,12 +553,21 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     if (!spreadsheetData) return;
     
     try {
-      const values = {
-        quantidadeVendas: parseFloat(cardValues.quantidadeVendas.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
-        valorBruto: parseFloat(cardValues.valorBruto.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
-        taxa: parseFloat(cardValues.taxa.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
-        valorLiquido: parseFloat(cardValues.valorLiquido.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0,
-      };
+      const values: any = {};
+      
+      // Converter valores usando parseValorBrasileiro para garantir conversão correta
+      if (cardValues.quantidadeVendas) {
+        values.quantidadeVendas = parseFloat(cardValues.quantidadeVendas.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
+      }
+      if (cardValues.valorBruto) {
+        values.valorBruto = parseValorBrasileiro(cardValues.valorBruto);
+      }
+      if (cardValues.taxa) {
+        values.taxa = parseValorBrasileiro(cardValues.taxa);
+      }
+      if (cardValues.valorLiquido) {
+        values.valorLiquido = parseValorBrasileiro(cardValues.valorLiquido);
+      }
 
       saveCustomerCardValues(
         customerId, 
@@ -1190,7 +1244,54 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                   <input
                     type="text"
                     value={cardValues.valorBruto}
-                    onChange={(e) => setCardValues({ ...cardValues, valorBruto: e.target.value })}
+                    onChange={(e) => {
+                      let valorBruto = e.target.value;
+                      
+                      // Se vazio, limpar tudo
+                      if (!valorBruto || valorBruto.trim() === '') {
+                        setCardValues({ ...cardValues, valorBruto: '', taxa: '', valorLiquido: '' });
+                        return;
+                      }
+                      
+                      // Normalizar entrada (remove caracteres inválidos, mas mantém números, vírgula e ponto)
+                      valorBruto = normalizarEntrada(valorBruto);
+                      
+                      // Converter para número (remove formatação)
+                      const valorBrutoNum = parseValorBrasileiro(valorBruto);
+                      
+                      // Atualizar campo com valor normalizado (permite digitação livre)
+                      setCardValues({ ...cardValues, valorBruto: valorBruto });
+                      
+                      // Se o valor é válido, calcular e formatar os outros campos
+                      if (valorBrutoNum > 0) {
+                        // Calcular taxa automaticamente (5,10%)
+                        const taxaCalculada = (valorBrutoNum * TAXA_PERCENTUAL) / 100;
+                        // Calcular valor líquido automaticamente
+                        const valorLiquidoCalculado = valorBrutoNum - taxaCalculada;
+                        
+                        // Formatar apenas os campos calculados
+                        const taxaFormatada = formatarValorBrasileiro(taxaCalculada);
+                        const valorLiquidoFormatado = formatarValorBrasileiro(valorLiquidoCalculado);
+                        
+                        setCardValues({
+                          ...cardValues,
+                          valorBruto: valorBruto, // Mantém o valor digitado sem formatar ainda
+                          taxa: taxaFormatada,
+                          valorLiquido: valorLiquidoFormatado,
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      // Quando o campo perde o foco, formatar o valor bruto
+                      const valorBruto = e.target.value;
+                      if (valorBruto) {
+                        const valorBrutoNum = parseValorBrasileiro(valorBruto);
+                        if (valorBrutoNum > 0) {
+                          const valorBrutoFormatado = formatarValorBrasileiro(valorBrutoNum);
+                          setCardValues({ ...cardValues, valorBruto: valorBrutoFormatado });
+                        }
+                      }
+                    }}
                     className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
                     placeholder="0,00"
                   />
@@ -1199,25 +1300,54 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                       Valor calculado: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(spreadsheetMetrics.valorBrutoTotal)}
                     </p>
                   )}
+                  <p className="text-xs text-blue-600 mt-1">
+                    💡 Ao inserir o valor bruto, a taxa (5,10% em R$) e o valor líquido serão calculados automaticamente.
+                  </p>
                 </div>
 
                 {/* Taxa */}
                 <div>
                   <label className="block text-sm font-medium text-black mb-2">
-                    Taxa (%)
+                    Taxa (R$)
                   </label>
                   <input
                     type="text"
                     value={cardValues.taxa}
-                    onChange={(e) => setCardValues({ ...cardValues, taxa: e.target.value })}
+                    onChange={(e) => {
+                      const taxa = e.target.value;
+                      
+                      // Se vazio, limpar
+                      if (!taxa || taxa.trim() === '') {
+                        setCardValues({ ...cardValues, taxa: '' });
+                        return;
+                      }
+                      
+                      const taxaNum = parseValorBrasileiro(taxa);
+                      const taxaFormatada = taxaNum > 0 ? formatarValorBrasileiro(taxaNum) : taxa;
+                      
+                      setCardValues({ ...cardValues, taxa: taxaFormatada });
+                      
+                      // Recalcular valor líquido se houver valor bruto
+                      if (cardValues.valorBruto && taxaNum > 0) {
+                        const valorBrutoNum = parseValorBrasileiro(cardValues.valorBruto);
+                        if (valorBrutoNum > 0) {
+                          const valorLiquidoCalculado = valorBrutoNum - taxaNum;
+                          const valorLiquidoFormatado = formatarValorBrasileiro(valorLiquidoCalculado);
+                          setCardValues({ ...cardValues, taxa: taxaFormatada, valorLiquido: valorLiquidoFormatado });
+                        }
+                      }
+                    }}
                     className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
                     placeholder="0,00"
                   />
                   {spreadsheetMetrics && (
                     <p className="text-xs text-gray-500 mt-1">
-                      Valor calculado: {spreadsheetMetrics.taxaMedia.toFixed(2)}%
+                      Valor calculado da planilha: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(spreadsheetMetrics.taxaMedia * spreadsheetMetrics.valorBrutoTotal / 100)}
                     </p>
                   )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Taxa calculada automaticamente: 5,10% do valor bruto (em R$).
+                  </p>
                 </div>
 
                 {/* Valor Líquido */}
@@ -1228,8 +1358,8 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                   <input
                     type="text"
                     value={cardValues.valorLiquido}
-                    onChange={(e) => setCardValues({ ...cardValues, valorLiquido: e.target.value })}
-                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                    readOnly
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors bg-gray-50"
                     placeholder="0,00"
                   />
                   {spreadsheetMetrics && (
@@ -1237,6 +1367,9 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                       Valor calculado: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(spreadsheetMetrics.valorLiquidoTotal)}
                     </p>
                   )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Valor líquido calculado automaticamente (Valor Bruto - Taxa).
+                  </p>
                 </div>
               </div>
             </div>
