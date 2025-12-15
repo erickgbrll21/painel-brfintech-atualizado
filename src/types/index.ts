@@ -107,3 +107,18 @@ export interface SpreadsheetSale {
   numeroMaquina: string;
 }
 
+export type TransferStatus = 'enviado' | 'pendente' | 'nao_enviado';
+
+export interface Transfer {
+  id: string;
+  periodo?: string; // Período ou referência do repasse (ex: "2024-01" para mensal ou "2024-01-15" para diária)
+  valorBruto: number; // Valor bruto em reais
+  taxas: number; // Taxas em reais
+  valorLiquido: number; // Valor líquido em reais
+  status: TransferStatus; // Status do repasse
+  dataEnvio: string; // Data do envio (ISO string) - vazio quando status é pendente
+  customerId: string; // ID do cliente associado ao repasse
+  customerName?: string; // Nome do cliente (opcional, para facilitar exibição)
+  createdAt: string; // Data de criação do registro
+}
+

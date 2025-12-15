@@ -7,6 +7,7 @@ import Customers from './pages/Customers';
 import CustomerSales from './pages/CustomerSales';
 import CieloTransactions from './pages/CieloTransactions';
 import TerminalDashboard from './pages/TerminalDashboard';
+import Transfers from './pages/Transfers';
 import Layout from './components/Layout';
 import './utils/resetDatabase'; // Importar para disponibilizar resetDatabase() no console
 
@@ -40,6 +41,7 @@ const AppRoutes = () => {
         <Route path="users" element={<Users />} />
         <Route path="customers" element={<Customers />} />
         <Route path="customers/:customerId/sales" element={<CustomerSales />} />
+        <Route path="transfers" element={<Transfers />} />
         <Route path="cielo" element={<CieloTransactions />} />
         <Route path="terminal/:terminalId" element={<TerminalDashboard />} />
       </Route>

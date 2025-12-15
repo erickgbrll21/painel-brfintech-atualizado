@@ -2,6 +2,9 @@
 
 import { SpreadsheetSale } from '../types';
 import { getCustomerTax } from './customerTaxService';
+import { createTransfer } from './transferService';
+import { getCustomers } from './customerService';
+import { getCustomerCardValues } from './customerCardValuesService';
 
 // Interface para métricas calculadas da planilha
 export interface SpreadsheetMetrics {
@@ -903,7 +906,7 @@ const getReferenceMonth = (date: string | Date): string => {
 // Salvar planilha
 // - Planilhas DIÁRIAS: sempre adiciona nova entrada (múltiplas por mês permitidas)
 // - Planilhas MENSAIS: substitui se já existir uma para o mesmo mês
-export const saveSpreadsheet = (spreadsheet: Omit<SpreadsheetData, 'sales' | 'id' | 'referenceMonth' | 'type' | 'referenceDate'> & { sales?: SpreadsheetSale[]; referenceMonth?: string; referenceDate?: string; type?: 'monthly' | 'daily' }): void => {
+export const saveSpreadsheet = async (spreadsheet: Omit<SpreadsheetData, 'sales' | 'id' | 'referenceMonth' | 'type' | 'referenceDate'> & { sales?: SpreadsheetSale[]; referenceMonth?: string; referenceDate?: string; type?: 'monthly' | 'daily' }): Promise<void> => {
   try {
     let spreadsheets = getAllSpreadsheets();
     
@@ -962,8 +965,100 @@ export const saveSpreadsheet = (spreadsheet: Omit<SpreadsheetData, 'sales' | 'id
     }
     
     localStorage.setItem(STORAGE_KEY, JSON.stringify(spreadsheets));
+    
+    // Criar automaticamente um registro no Histórico de Repasses
+    try {
+      await createTransferFromSpreadsheet(spreadsheetToSave);
+    } catch (transferError) {
+      // Não bloquear o salvamento da planilha se houver erro ao criar repasse
+      console.error('Erro ao criar repasse automaticamente:', transferError);
+    }
   } catch (error) {
     console.error('Erro ao salvar planilha:', error);
+    throw error;
+  }
+};
+
+// Criar repasse automaticamente a partir de uma planilha
+const createTransferFromSpreadsheet = async (spreadsheet: SpreadsheetData): Promise<void> => {
+  try {
+    // Buscar valores customizados dos cards editados pelo administrador
+    const customValues = getCustomerCardValues(
+      spreadsheet.customerId,
+      spreadsheet.terminalId,
+      spreadsheet.referenceMonth,
+      spreadsheet.referenceDate,
+      spreadsheet.type || 'monthly'
+    );
+    
+    // Calcular métricas da planilha (usar como fallback)
+    const metrics = calculateSpreadsheetMetrics(spreadsheet);
+    
+    // Usar valores customizados se existirem, senão usar valores calculados da planilha
+    let valorBruto = customValues?.valorBruto ?? metrics.valorBrutoTotal;
+    
+    // Taxa: usar valor absoluto dos cards se existir (já está em R$), senão calcular
+    let taxas: number;
+    if (customValues?.taxa !== undefined && customValues.taxa > 0) {
+      // Taxa nos cards já é valor absoluto em reais (R$), não porcentagem
+      taxas = customValues.taxa;
+    } else if (customValues?.valorBruto !== undefined && customValues.valorBruto > 0) {
+      // Se tem valor bruto customizado mas não tem taxa customizada, calcular 5,10%
+      taxas = customValues.valorBruto * 0.051;
+    } else if (metrics.taxaMedia > 0) {
+      // Se a planilha tem taxa média, usar ela
+      taxas = metrics.valorBrutoTotal * (metrics.taxaMedia / 100);
+    } else {
+      // Fallback: 5,10% do valor bruto
+      taxas = metrics.valorBrutoTotal * 0.051;
+    }
+    
+    // Valor líquido: usar customizado se existir, senão calcular
+    let valorLiquido = customValues?.valorLiquido;
+    if (!valorLiquido || valorLiquido <= 0) {
+      valorLiquido = valorBruto - taxas;
+    }
+    
+    // Verificar se há valores válidos
+    if (valorBruto <= 0) {
+      console.log('Planilha sem valor bruto válido, não criando repasse');
+      return;
+    }
+    
+    // Obter nome do cliente
+    const customers = await getCustomers();
+    const customer = customers.find(c => c.id === spreadsheet.customerId);
+    const customerName = customer?.name || '';
+    
+    // Determinar período/referência
+    let periodo: string | undefined;
+    if (spreadsheet.type === 'daily' && spreadsheet.referenceDate) {
+      // Para planilhas diárias, usar a data formatada
+      const date = new Date(spreadsheet.referenceDate);
+      periodo = date.toLocaleDateString('pt-BR');
+    } else if (spreadsheet.referenceMonth) {
+      // Para planilhas mensais, usar o mês formatado
+      const [year, month] = spreadsheet.referenceMonth.split('-');
+      const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                          'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      periodo = `${monthNames[parseInt(month) - 1]}/${year}`;
+    }
+    
+    // Criar o repasse com status Pendente e data de envio vazia
+    await createTransfer({
+      periodo,
+      valorBruto,
+      taxas,
+      valorLiquido,
+      status: 'pendente',
+      dataEnvio: '', // Data vazia quando status é pendente
+      customerId: spreadsheet.customerId,
+      customerName,
+    });
+    
+    console.log('Repasse criado automaticamente para planilha:', spreadsheet.id, customValues ? '(usando valores customizados)' : '(usando valores da planilha)');
+  } catch (error) {
+    console.error('Erro ao criar repasse a partir da planilha:', error);
     throw error;
   }
 };

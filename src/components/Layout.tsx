@@ -7,7 +7,8 @@ import {
   CreditCard, 
   LogOut,
   Menu,
-  X
+  X,
+  History
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -30,6 +31,7 @@ const Layout = () => {
       { path: '/users', label: 'Usuários', icon: Users },
       { path: '/customers', label: 'Clientes', icon: Building2 },
     ] : []),
+    { path: '/transfers', label: 'Histórico de Repasses', icon: History },
     ...(isAdmin() || !isCustomer() ? [
       { path: '/cielo', label: 'API', icon: CreditCard },
     ] : []),

@@ -1,5 +1,8 @@
 // Serviço para gerenciar valores customizados dos cards dos clientes
 
+import { getTransfers, updateTransfer } from './transferService';
+import { Transfer } from '../types';
+
 const STORAGE_KEY = 'customer_card_values';
 
 export interface CustomerCardValues {
@@ -114,6 +117,11 @@ export const saveCustomerCardValues = (
     
     localStorage.setItem(STORAGE_KEY, JSON.stringify(allValues));
     
+    // Atualizar repasses existentes com os valores customizados
+    updateTransfersWithCustomValues(customerId, terminalId, referenceMonth, referenceDate, type, values).catch(err => {
+      console.error('Erro ao atualizar repasses com valores customizados:', err);
+    });
+    
     // Disparar evento para atualizar dashboards
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent('cardValuesUpdated', { 
@@ -150,6 +158,96 @@ export const deleteCustomerCardValues = (
   } catch (error) {
     console.error('Erro ao deletar valores dos cards:', error);
     throw error;
+  }
+};
+
+// Atualizar repasses existentes com valores customizados dos cards
+const updateTransfersWithCustomValues = async (
+  customerId: string,
+  _terminalId: string | undefined,
+  referenceMonth: string | undefined,
+  referenceDate: string | undefined,
+  type: 'monthly' | 'daily' | undefined,
+  values: {
+    quantidadeVendas?: number;
+    valorBruto?: number;
+    taxa?: number;
+    valorLiquido?: number;
+  }
+): Promise<void> => {
+  try {
+    const transfers = await getTransfers();
+    
+    // Determinar período para buscar repasses correspondentes
+    let periodoToMatch: string | undefined;
+    if (type === 'daily' && referenceDate) {
+      const date = new Date(referenceDate);
+      periodoToMatch = date.toLocaleDateString('pt-BR');
+    } else if (referenceMonth) {
+      const [year, month] = referenceMonth.split('-');
+      const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                          'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      periodoToMatch = `${monthNames[parseInt(month) - 1]}/${year}`;
+    }
+    
+    // Buscar repasses do mesmo cliente e período
+    const matchingTransfers = transfers.filter(t => 
+      t.customerId === customerId && 
+      t.periodo === periodoToMatch
+    );
+    
+    if (matchingTransfers.length === 0) {
+      return; // Não há repasses para atualizar
+    }
+    
+    // Calcular valores atualizados usando os valores dos cards
+    let valorBruto = values.valorBruto;
+    let taxas: number | undefined;
+    let valorLiquido = values.valorLiquido;
+    
+    // Taxa: usar valor absoluto dos cards se existir (já está em R$), senão calcular 5,10% do valor bruto
+    if (values.taxa !== undefined && values.taxa > 0) {
+      // Taxa nos cards já é valor absoluto em reais (R$), não porcentagem
+      taxas = values.taxa;
+    } else if (valorBruto !== undefined && valorBruto > 0) {
+      // Se tem valor bruto mas não tem taxa customizada, calcular 5,10%
+      taxas = valorBruto * 0.051;
+    }
+    
+    // Calcular valor líquido se não estiver definido
+    if ((!valorLiquido || valorLiquido <= 0) && valorBruto && taxas) {
+      valorLiquido = valorBruto - taxas;
+    }
+    
+    // Atualizar cada repasse encontrado com os valores dos cards
+    for (const transfer of matchingTransfers) {
+      const updates: Partial<Transfer> = {};
+      
+      // Sincronizar valor bruto
+      if (valorBruto !== undefined && valorBruto > 0) {
+        updates.valorBruto = valorBruto;
+      }
+      
+      // Sincronizar taxas
+      if (taxas !== undefined && taxas >= 0) {
+        updates.taxas = taxas;
+      }
+      
+      // Sincronizar valor líquido
+      if (valorLiquido !== undefined && valorLiquido > 0) {
+        updates.valorLiquido = valorLiquido;
+      }
+      
+      // Atualizar o repasse com os valores dos cards
+      if (Object.keys(updates).length > 0) {
+        await updateTransfer(transfer.id, updates);
+      }
+    }
+    
+    console.log(`Repasses atualizados com valores customizados: ${matchingTransfers.length} repasse(s)`);
+  } catch (error) {
+    console.error('Erro ao atualizar repasses com valores customizados:', error);
+    // Não lançar erro para não bloquear o salvamento dos valores dos cards
   }
 };
 

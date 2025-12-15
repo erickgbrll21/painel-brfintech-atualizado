@@ -416,7 +416,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     }
   };
 
-  const handleConfirmSave = () => {
+  const handleConfirmSave = async () => {
     if (!previewData) return;
     
     try {
@@ -433,7 +433,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
         type: spreadsheetType,
       };
       
-      saveSpreadsheet(spreadsheetToSave);
+      await saveSpreadsheet(spreadsheetToSave);
       
       // Recarregar meses e dias disponíveis baseado no tipo
       if (spreadsheetToSave.type === 'daily') {
