@@ -187,10 +187,12 @@ const Dashboard = () => {
           // Manter o dia selecionado e recarregar a planilha
           const daySpreadsheet = getSpreadsheetByDate(user.customerId, selectedDay, terminalIdForDays);
           setSpreadsheetDataDaily(daySpreadsheet || null);
-        } else if (days.length > 0 && !selectedDay) {
+        } else if (days.length > 0) {
           // Se não há dia selecionado mas há dias disponíveis, usar o mais recente
-          setSelectedDay(days[0]);
-          const daySpreadsheet = getSpreadsheetByDate(user.customerId, days[0], terminalIdForDays);
+          // OU se o dia selecionado não está mais na lista, usar o mais recente
+          const mostRecentDay = days[0]; // Dias já vêm ordenados do mais recente
+          setSelectedDay(mostRecentDay);
+          const daySpreadsheet = getSpreadsheetByDate(user.customerId, mostRecentDay, terminalIdForDays);
           setSpreadsheetDataDaily(daySpreadsheet || null);
         } else {
           // Limpar seleção se não há dias disponíveis
@@ -228,13 +230,25 @@ const Dashboard = () => {
     const handleSpreadsheetUpdate = (event: CustomEvent) => {
       const eventTerminalId = event.detail?.terminalId;
       const eventCustomerId = event.detail?.customerId;
+      const eventType = event.detail?.type; // Tipo da planilha (daily ou monthly)
+      const eventReferenceDate = event.detail?.referenceDate; // Data de referência para planilhas diárias
       
       // Atualizar se for do mesmo cliente E (mesmo terminal OU não especificou terminal OU está em "all")
       if (eventCustomerId === user?.customerId && isMounted) {
         if (!eventTerminalId || eventTerminalId === selectedTerminalId || selectedTerminalId === 'all') {
-          // Forçar atualização imediata, resetando o hash para garantir recálculo
-          hashRef.current = '';
-          loadCustomerData();
+          // Se for planilha diária e temos a data de referência, selecionar esse dia ANTES de carregar dados
+          if (eventType === 'daily' && eventReferenceDate) {
+            // Atualizar o dia primeiro, depois carregar dados após um pequeno delay para garantir que o estado foi atualizado
+            setSelectedDay(eventReferenceDate);
+            setTimeout(() => {
+              hashRef.current = '';
+              loadCustomerData();
+            }, 50);
+          } else {
+            // Para planilhas mensais ou quando não há data de referência, atualizar imediatamente
+            hashRef.current = '';
+            loadCustomerData();
+          }
         }
       }
     };
@@ -363,7 +377,7 @@ const Dashboard = () => {
     };
 
     updateCardValues();
-  }, [isCustomer, user?.customerId, selectedTerminalId, selectedMonth, selectedDay, activeTab, spreadsheetData, spreadsheetDataDaily]);
+  }, [isCustomer, user?.customerId, selectedTerminalId, selectedMonth, selectedDay, activeTab, spreadsheetData, spreadsheetDataDaily, availableDays]);
 
   const handleFilterChange = useCallback((newFilters: FilterOptions) => {
     setFilters(prevFilters => {

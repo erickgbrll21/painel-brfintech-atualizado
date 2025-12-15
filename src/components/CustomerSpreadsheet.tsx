@@ -502,8 +502,11 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('spreadsheetUpdated', { 
           detail: { 
-            customerId: previewData.customerId, 
-            terminalId: previewData.terminalId,
+            customerId: spreadsheetToSave.customerId, 
+            terminalId: spreadsheetToSave.terminalId,
+            type: spreadsheetToSave.type || 'monthly',
+            referenceDate: spreadsheetToSave.referenceDate,
+            referenceMonth: spreadsheetToSave.referenceMonth,
             forceUpdate: true 
           } 
         }));
