@@ -128,6 +128,16 @@ export const createUser = async (
 ): Promise<User> => {
   await new Promise(resolve => setTimeout(resolve, 300));
   
+  // Validar senha obrigatória
+  if (!password || password.trim() === '') {
+    throw new Error('Senha é obrigatória para criar um novo usuário');
+  }
+  
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  
   // Recarregar usuários atualizados
   ALL_USERS = loadUsersFromStorage();
   
@@ -141,10 +151,15 @@ export const createUser = async (
   
   ALL_USERS.push(newUser);
   
-  // Armazenar senha com hash se fornecida
-  if (password) {
-    USER_PASSWORDS[newUser.id] = await hashPassword(password);
+  // Armazenar senha com hash
+  try {
+    const hashedPassword = await hashPassword(password);
+    USER_PASSWORDS[newUser.id] = hashedPassword;
     await savePasswordsToStorage();
+    console.log('Senha salva com sucesso para usuário:', newUser.id, newUser.email);
+  } catch (error) {
+    console.error('Erro ao salvar senha:', error);
+    throw new Error('Erro ao salvar senha do usuário');
   }
   
   // Salvar no localStorage
@@ -160,6 +175,11 @@ export const updateUser = async (
 ): Promise<User | null> => {
   await new Promise(resolve => setTimeout(resolve, 300));
   
+  // Garantir que senhas estejam inicializadas
+  if (!passwordsInitialized) {
+    await loadPasswordsFromStorage();
+  }
+  
   // Recarregar usuários atualizados
   ALL_USERS = loadUsersFromStorage();
   
@@ -167,10 +187,17 @@ export const updateUser = async (
   if (user) {
     Object.assign(user, updates);
     
-    // Atualizar senha com hash se fornecida
-    if (password) {
-      USER_PASSWORDS[id] = await hashPassword(password);
-      await savePasswordsToStorage();
+    // Atualizar senha com hash se fornecida e não vazia
+    if (password && password.trim() !== '') {
+      try {
+        const hashedPassword = await hashPassword(password);
+        USER_PASSWORDS[id] = hashedPassword;
+        await savePasswordsToStorage();
+        console.log('Senha atualizada com sucesso para usuário:', id, user.email);
+      } catch (error) {
+        console.error('Erro ao atualizar senha:', error);
+        throw new Error('Erro ao atualizar senha do usuário');
+      }
     }
     
     // Salvar no localStorage

@@ -41,11 +41,11 @@ const Users = () => {
       const { password, ...userData } = formData;
       
       if (editingUser) {
-        // Ao editar, só atualiza senha se fornecida
-        await updateUser(editingUser.id, userData, password || undefined);
+        // Ao editar, só atualiza senha se fornecida e não vazia
+        await updateUser(editingUser.id, userData, password && password.trim() !== '' ? password : undefined);
       } else {
         // Ao criar, senha é obrigatória
-        if (!password) {
+        if (!password || password.trim() === '') {
           alert('Por favor, defina uma senha para o novo usuário.');
           return;
         }
